@@ -56,3 +56,5 @@ skills-lock.json
 prompt.md
 
 AGENTS.md 
+public/apollon.css
+vite.config.ts.timestamp-*.mjs

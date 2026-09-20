@@ -14,6 +14,7 @@ export class AppError extends Error {
 
 const FRIENDLY_MESSAGES: Record<string, string> = {
   UNAUTHORIZED: 'Tu sesión ha expirado. Por favor, inicia sesión de nuevo.',
+  INVALID_CREDENTIALS: 'Credenciales inválidas',
   FORBIDDEN: 'No tienes permiso para realizar esta acción.',
   NOT_FOUND: 'El recurso solicitado no existe.',
   VALIDATION_ERROR: 'Los datos enviados no son válidos.',
@@ -31,5 +32,8 @@ export function normalizeError(err: unknown): AppError {
 
 export function friendlyMessage(err: unknown): string {
   const appErr = normalizeError(err);
+  if (appErr.message === 'Credenciales inválidas') {
+    return 'Credenciales inválidas';
+  }
   return FRIENDLY_MESSAGES[appErr.code] ?? appErr.message ?? 'Ha ocurrido un error inesperado.';
 }

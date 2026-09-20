@@ -3,7 +3,9 @@
 @tailwind components;
 @tailwind utilities;
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -34,22 +36,52 @@ body {
 }
 
 /* Scrollbar personalizada */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-foreground-faint); }
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-foreground-faint);
+}
 
 /* Animaciones reducidas */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
 }
 
 /* Utilities */
-.font-mono { font-family: var(--font-mono); }
-.text-foreground { color: var(--color-foreground); }
-.text-foreground-muted { color: var(--color-foreground-muted); }
-.text-foreground-faint { color: var(--color-foreground-faint); }
-.text-foreground-inverse { color: var(--color-foreground-inverse); }
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.text-foreground {
+  color: var(--color-foreground);
+}
+
+.text-foreground-muted {
+  color: var(--color-foreground-muted);
+}
+
+.text-foreground-faint {
+  color: var(--color-foreground-faint);
+}
+
+.text-foreground-inverse {
+  color: var(--color-foreground-inverse);
+}

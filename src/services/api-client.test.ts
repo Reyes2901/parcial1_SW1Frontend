@@ -52,7 +52,7 @@ describe('apiClient', () => {
     await expect(apiClient.get('/projects/secret')).rejects.toThrow(AppError);
   });
 
-  it('triggers logout on 401 Unauthorized', async () => {
+  it('triggers logout on 401 Unauthorized when token was present', async () => {
     useAuthStore.getState().setSession({
       token: 'valid-token',
       user: { id: 'u1', email: 'a@b.com', name: 'User' },
@@ -63,7 +63,17 @@ describe('apiClient', () => {
     );
     vi.stubGlobal('fetch', mockFetch);
 
-    await expect(apiClient.get('/projects')).rejects.toThrow(AppError);
+    await expect(apiClient.get('/projects')).rejects.toThrow('Sesión expirada');
+    expect(useAuthStore.getState().token).toBeNull();
+  });
+
+  it('throws AppError without logout on 401 Unauthorized when no token was present', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Invalid credentials', code: 'UNAUTHORIZED' }), { status: 401 }),
+    );
+    vi.stubGlobal('fetch', mockFetch);
+
+    await expect(apiClient.post('/auth/login', { email: 'a', password: 'b' })).rejects.toThrow('Credenciales inválidas');
     expect(useAuthStore.getState().token).toBeNull();
   });
 });

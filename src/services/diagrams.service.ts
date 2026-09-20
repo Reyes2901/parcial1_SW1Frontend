@@ -9,7 +9,7 @@ export interface Diagram {
   version: number;
   createdAt: string;
   updatedAt: string;
-  model: UMLModel;
+  umlModel: UMLModel;
 }
 
 export interface DiagramVersion {
@@ -27,7 +27,8 @@ export const diagramsService = {
   get: (id: string) => apiClient.get<Diagram>(`/diagrams/${id}`),
   create: (projectId: string, payload: { name: string }) =>
     apiClient.post<Diagram>(`/projects/${projectId}/diagrams`, payload),
-  save: (id: string, model: UMLModel) => apiClient.put<Diagram>(`/diagrams/${id}`, { model }),
+  save: (id: string, umlModel: UMLModel, version: number) =>
+    apiClient.put<Diagram>(`/diagrams/${id}`, { umlModel, version }),
   versions: (id: string) => apiClient.get<DiagramVersion[]>(`/diagrams/${id}/versions`),
   createVersion: (id: string) => apiClient.post(`/diagrams/${id}/versions`),
   acquireLock: (id: string, classId: string) =>

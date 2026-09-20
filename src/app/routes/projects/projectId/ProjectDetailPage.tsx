@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useProject, useProjectMembers } from '../../../../hooks/useProjects';
 import { Topbar } from '../../../../components/layout/Topbar';
 import { Spinner } from '../../../../components/ui/Spinner';
@@ -8,15 +8,18 @@ import { Button } from '../../../../components/ui/Button';
 import { Plus, ChevronLeft } from 'lucide-react';
 import { cn } from '../../../../lib/cn';
 import { formatRelativeDate } from '../../../../lib/format';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { diagramsService } from '../../../../services/diagrams.service';
 import { queryKeys } from '../../../../lib/query-keys';
+import { toast } from 'sonner';
 
 type Tab = 'diagrams' | 'members' | 'activity' | 'settings';
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [activeTab, setActiveTab] = useState<Tab>('diagrams');
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const projectQuery = useProject(projectId!);
   const membersQuery = useProjectMembers(projectId!);
@@ -24,6 +27,18 @@ export default function ProjectDetailPage() {
     queryKey: queryKeys.diagrams(projectId!),
     queryFn: () => diagramsService.list(projectId!),
     staleTime: 30_000,
+  });
+
+  const createDiagramMutation = useMutation({
+    mutationFn: (name: string) => diagramsService.create(projectId!, { name }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.diagrams(projectId!) });
+      toast.success('Diagrama creado exitosamente');
+      navigate(`/editor/${data.id}`);
+    },
+    onError: (err: unknown) => {
+      toast.error((err as Error)?.message || 'Error al crear el diagrama');
+    },
   });
 
   const project = projectQuery.data;
@@ -77,9 +92,29 @@ export default function ProjectDetailPage() {
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-medium text-[var(--color-foreground)]">Diagramas</h3>
-                  <Button size="sm" leftIcon={<Plus className="h-3.5 w-3.5" />}>Nuevo diagrama</Button>
+                  <Button
+                    size="sm"
+                    leftIcon={<Plus className="h-3.5 w-3.5" />}
+                    loading={createDiagramMutation.isPending}
+                    onClick={() => createDiagramMutation.mutate('Diagrama sin título')}
+                  >
+                    Nuevo diagrama
+                  </Button>
                 </div>
                 {diagramsQuery.isLoading && <Spinner />}
+                {diagramsQuery.data && diagramsQuery.data.length === 0 && (
+                  <div className="text-center py-12 border border-dashed border-[var(--color-border)] rounded-[var(--radius-card)] bg-[var(--color-secondary)]">
+                    <p className="text-sm text-[var(--color-foreground-muted)] mb-3">No hay diagramas en este proyecto.</p>
+                    <Button
+                      size="sm"
+                      leftIcon={<Plus className="h-3.5 w-3.5" />}
+                      loading={createDiagramMutation.isPending}
+                      onClick={() => createDiagramMutation.mutate('Diagrama sin título')}
+                    >
+                      Crear primer diagrama
+                    </Button>
+                  </div>
+                )}
                 {diagramsQuery.data?.map((d) => (
                   <Link
                     key={d.id}
@@ -101,11 +136,11 @@ export default function ProjectDetailPage() {
                 {membersQuery.data?.map((m) => (
                   <div key={m.id} className="flex items-center gap-3 p-3 mb-2 bg-[var(--color-secondary)] border border-[var(--color-border)] rounded-[var(--radius-card)]">
                     <div className="h-8 w-8 rounded-full bg-[var(--color-primary-muted)] flex items-center justify-center text-sm font-medium text-[var(--color-primary)]">
-                      {m.name.charAt(0)}
+                      {(m.name ?? m.email ?? '?').charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm font-medium">{m.name}</p>
-                      <p className="text-xs text-[var(--color-foreground-muted)]">{m.email}</p>
+                      <p className="text-sm font-medium">{m.name ?? 'Sin nombre'}</p>
+                      <p className="text-xs text-[var(--color-foreground-muted)]">{m.email ?? '—'}</p>
                     </div>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-primary)] font-medium">{m.role}</span>
                   </div>
@@ -124,3 +159,4 @@ export default function ProjectDetailPage() {
     </div>
   );
 }
+

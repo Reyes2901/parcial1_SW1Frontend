@@ -79,15 +79,15 @@ export function ProjectCard({ project, onDelete, onRename }: ProjectCardProps) {
         <div className="flex items-center gap-4 text-xs text-[var(--color-foreground-muted)]">
           <span className="flex items-center gap-1">
             <GitBranch className="h-3 w-3" />
-            {plural(project.diagramCount, 'diagrama')}
+            {plural(project.diagramCount ?? 0, 'diagrama')}
           </span>
           <span className="flex items-center gap-1">
             <Calendar className="h-3 w-3" />
-            {formatRelativeDate(project.updatedAt)}
+            {project.updatedAt ? formatRelativeDate(project.updatedAt) : '—'}
           </span>
           <span className="flex items-center gap-1">
             <Users className="h-3 w-3" />
-            {project.members.length}
+            {project.members?.length ?? 0}
           </span>
         </div>
       </div>

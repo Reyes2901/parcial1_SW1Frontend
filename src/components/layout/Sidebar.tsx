@@ -76,12 +76,12 @@ export function Sidebar() {
         {user && (
           <div className={cn('flex items-center gap-3 px-3 py-2', sidebarCollapsed && 'justify-center')}>
             <div className="h-7 w-7 rounded-full bg-[var(--color-icon)] flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
-              {user.name.charAt(0).toUpperCase()}
+              {(user.name ?? user.email ?? '?').charAt(0).toUpperCase()}
             </div>
             {!sidebarCollapsed && (
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-white truncate">{user.name}</p>
-                <p className="text-xs text-white/50 truncate">{user.email}</p>
+                <p className="text-xs font-medium text-white truncate">{user.name ?? 'Usuario'}</p>
+                <p className="text-xs text-white/50 truncate">{user.email ?? '—'}</p>
               </div>
             )}
             {!sidebarCollapsed && (

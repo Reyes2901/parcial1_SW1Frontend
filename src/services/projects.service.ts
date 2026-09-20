@@ -5,9 +5,9 @@ export interface Project {
   name: string;
   description?: string;
   createdAt: string;
-  updatedAt: string;
-  diagramCount: number;
-  members: ProjectMember[];
+  updatedAt?: string;
+  diagramCount?: number;
+  members?: ProjectMember[];
 }
 
 export interface ProjectMember {

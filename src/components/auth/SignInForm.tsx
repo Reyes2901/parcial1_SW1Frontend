@@ -18,10 +18,12 @@ export function SignInForm() {
     register,
     handleSubmit,
     setError,
+    clearErrors,
     formState: { errors },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const onSubmit = (data: FormData) => {
+    clearErrors('root');
     login.mutate(data, {
       onError: (err) => {
         setError('root', { message: friendlyMessage(err) });

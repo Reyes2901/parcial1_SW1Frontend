@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
   ChevronLeft, Bot, Upload, Code, CheckCircle, Loader, AlertCircle,
 } from 'lucide-react';
@@ -28,6 +29,7 @@ const SAVE_STATUS_ICON = {
 
 export default function EditorPage() {
   const { diagramId } = useParams<{ diagramId: string }>();
+  const navigate = useNavigate();
   const diagramQuery = useDiagram(diagramId!);
   const saveMutation = useSaveDiagram(diagramId!);
   const { saveStatus, activePanel, setActivePanel } = useEditorStore();
@@ -36,9 +38,25 @@ export default function EditorPage() {
 
   useLock(diagramId!);
 
-  const { scheduleSave } = useDebouncedSave(async (modelToSave) => {
-    await saveMutation.mutateAsync(modelToSave);
-  });
+  // Ref que mantiene la versión actual del DIAGRAMA (no del MCU)
+  const versionRef = useRef<number>(1);
+
+  // Sincroniza con la versión del servidor cuando carga el diagrama
+  useEffect(() => {
+    if (diagramQuery.data?.version != null) {
+      versionRef.current = diagramQuery.data.version;
+    }
+  }, [diagramQuery.data?.version]);
+
+  const saveFn = useCallback(async (umlModel: UMLModel) => {
+    const res = await saveMutation.mutateAsync({
+      umlModel,
+      version: versionRef.current,
+    });
+    versionRef.current = res.version;
+  }, [saveMutation]);
+
+  const { scheduleSave } = useDebouncedSave(saveFn);
 
   const handleModelChange = useCallback((model: UMLModel) => {
     setCurrentModel(model);
@@ -46,7 +64,14 @@ export default function EditorPage() {
   }, [scheduleSave]);
 
   const diagram = diagramQuery.data;
-  const model = currentModel ?? diagram?.model;
+  const emptyModel: UMLModel = {
+    id: diagram?.id ?? '',
+    name: diagram?.name ?? 'Sin título',
+    version: 1,
+    classes: [],
+    relations: [],
+  };
+  const model = currentModel ?? diagram?.umlModel ?? emptyModel;
 
   const handleApplyCommands = useCallback((commands: UMLCommand[] | null) => {
     if (!commands || commands.length === 0 || !model) return;
@@ -55,25 +80,40 @@ export default function EditorPage() {
     scheduleSave(updated);
   }, [model, scheduleSave]);
 
+  const handleGenerateCode = async () => {
+    if (!diagramId) return;
+    try {
+      toast.info('Generación iniciada');
+      const res = await diagramsService.generate(diagramId);
+      navigate(`/generations/${res.generationId}`);
+    } catch (err: unknown) {
+      toast.error((err as Error)?.message || 'Error al iniciar la generación de código');
+    }
+  };
   if (diagramQuery.isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex h-screen items-center justify-center">
         <Spinner size="lg" />
       </div>
     );
   }
 
   if (diagramQuery.isError || !diagram) {
-    return <ErrorState message="No se pudo cargar el diagrama." onRetry={() => diagramQuery.refetch()} />;
+    return (
+      <ErrorState
+        message="No se pudo cargar el diagrama."
+        onRetry={() => diagramQuery.refetch()}
+      />
+    );
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex h-screen flex-col overflow-hidden">
       {/* Topbar */}
-      <div className="h-14 flex items-center px-4 gap-3 bg-[var(--color-primary)] border-b border-white/10 flex-shrink-0">
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[var(--color-primary)] px-4">
         <Link
           to={`/projects/${diagram.projectId}`}
-          className="flex items-center gap-1 text-white/70 hover:text-white transition-colors text-sm"
+          className="flex items-center gap-1 text-sm text-white/70 transition-colors hover:text-white"
         >
           <ChevronLeft className="h-4 w-4" />
           Proyecto
@@ -85,14 +125,14 @@ export default function EditorPage() {
           {SAVE_STATUS_ICON[saveStatus]}
           <span>
             {saveStatus === 'saving' ? 'Guardando…' :
-             saveStatus === 'saved' ? 'Guardado' :
-             saveStatus === 'error' ? 'Error al guardar' : ''}
+              saveStatus === 'saved' ? 'Guardado' :
+                saveStatus === 'error' ? 'Error al guardar' : ''}
           </span>
         </div>
         <button
           onClick={() => setActivePanel(activePanel === 'ai' ? null : 'ai')}
           className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-control)] text-xs font-medium transition-colors',
+            'flex items-center gap-1.5 rounded-[var(--radius-control)] px-3 py-1.5 text-xs font-medium transition-colors',
             activePanel === 'ai' ? 'bg-white/20 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white',
           )}
         >
@@ -101,7 +141,7 @@ export default function EditorPage() {
         </button>
         <button
           onClick={() => setImportOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-control)] text-xs font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+          className="flex items-center gap-1.5 rounded-[var(--radius-control)] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white"
         >
           <Upload className="h-4 w-4" />
           Importar
@@ -113,41 +153,40 @@ export default function EditorPage() {
               window.open(`/generations/${res.generationId}`, '_blank');
             }
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-control)] text-xs font-medium bg-[var(--color-icon)] text-white hover:opacity-90 transition-opacity"
+          className="flex items-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--color-icon)] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
         >
           <Code className="h-4 w-4" />
           Generar código
         </button>
       </div>
 
-      {/* Main area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Canvas */}
-        <div className="flex-1 bg-[var(--color-background)] relative overflow-hidden">
+      {/* Fila central: flex-1 + min-h-0 CRÍTICO + overflow-hidden */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Canvas wrapper: RELATIVE (obligatorio para absolute inset-0) */}
+        <div className="relative min-w-0 flex-1 overflow-hidden bg-[var(--color-background)]">
           <ApollonCanvas
-            initialModel={diagram.model}
-            model={model}
+            initialModel={model}
             onModelChange={handleModelChange}
           />
         </div>
 
-        {/* Inspector panel */}
-        {activePanel === 'inspector' || activePanel === null ? (
-          <div className="w-72 flex-shrink-0 bg-[var(--color-secondary)] border-l border-[var(--color-border)] flex flex-col">
-            <div className="px-4 py-3 border-b border-[var(--color-border)]">
-              <span className="text-xs font-semibold text-[var(--color-foreground-muted)] uppercase tracking-wider">Inspector</span>
+        {/* Inspector */}
+        {activePanel === 'inspector' && model && (
+          <div className="flex w-72 shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-secondary)]">
+            <div className="border-b border-[var(--color-border)] px-4 py-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-foreground-muted)]">
+                Inspector
+              </span>
             </div>
-            {model ? (
-              <InspectorPanel
-                model={model}
-                onModelChange={handleModelChange}
-                onOpenAI={() => setActivePanel('ai')}
-              />
-            ) : null}
+            <InspectorPanel
+              model={model}
+              onModelChange={handleModelChange}
+              onOpenAI={() => setActivePanel('ai')}
+            />
           </div>
-        ) : null}
+        )}
 
-        {/* AI panel */}
+        {/* IA */}
         {activePanel === 'ai' && model && (
           <AIAssistantPanel
             diagramId={diagramId!}
@@ -159,9 +198,13 @@ export default function EditorPage() {
       </div>
 
       {/* Statusbar */}
-      <div className="h-8 flex items-center px-4 gap-4 bg-[var(--color-secondary)] border-t border-[var(--color-border)] flex-shrink-0">
-        <span className="text-xs font-mono text-[var(--color-foreground-faint)]">v{diagram.version}</span>
-        <span className="text-xs font-mono text-[var(--color-foreground-faint)]">{model?.classes.length ?? 0} clases · {model?.relations.length ?? 0} relaciones</span>
+      <div className="flex h-8 shrink-0 items-center gap-4 border-t border-[var(--color-border)] bg-[var(--color-secondary)] px-4">
+        <span className="font-mono text-xs text-[var(--color-foreground-faint)]">
+          v{diagram.version}
+        </span>
+        <span className="font-mono text-xs text-[var(--color-foreground-faint)]">
+          {model?.classes.length ?? 0} clases · {model?.relations.length ?? 0} relaciones
+        </span>
       </div>
 
       <ImportDialog
@@ -173,3 +216,4 @@ export default function EditorPage() {
     </div>
   );
 }
+

@@ -23,10 +23,12 @@ export function SignUpForm() {
     register,
     handleSubmit,
     setError,
+    clearErrors,
     formState: { errors },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const onSubmit = ({ name, email, password }: FormData) => {
+    clearErrors('root');
     registerUser.mutate({ name, email, password }, {
       onError: (err) => setError('root', { message: friendlyMessage(err) }),
     });

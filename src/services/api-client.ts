@@ -43,8 +43,14 @@ async function parseResponse<T>(
     try { errBody = await res.json(); } catch { /* no body */ }
 
     if (res.status === 401) {
-      handleGlobalLogout();
-      throw new AppError('Sesión expirada', 401, errBody.code ?? 'UNAUTHORIZED', errBody.details);
+      const hadToken = !!getToken();
+      if (hadToken) handleGlobalLogout();
+      throw new AppError(
+        hadToken ? 'Sesión expirada' : 'Credenciales inválidas',
+        401,
+        errBody.code ?? 'UNAUTHORIZED',
+        errBody.details,
+      );
     }
     if (res.status === 403) {
       toast.error('No tienes permiso para realizar esta acción.');

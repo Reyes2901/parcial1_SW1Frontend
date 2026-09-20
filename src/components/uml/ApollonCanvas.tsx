@@ -5,8 +5,7 @@ import type { UMLModel } from '../../domain/uml-model';
 import { useEditorStore } from '../../stores/editor.store';
 
 interface ApollonCanvasProps {
-  initialModel: UMLModel;
-  model?: UMLModel;
+  initialModel: UMLModel | undefined;
   onModelChange: (model: UMLModel) => void;
   onEditorReady?: (editor: ApollonEditor) => void;
   readOnly?: boolean;
@@ -14,12 +13,13 @@ interface ApollonCanvasProps {
 
 export function ApollonCanvas({
   initialModel,
-  model,
   onModelChange,
   onEditorReady,
   readOnly = false,
 }: ApollonCanvasProps) {
   const editorRef = useRef<ApollonEditor | null>(null);
+  const subModelRef = useRef<number | null>(null);
+  const subSelRef = useRef<number | null>(null);
   const { setSelectedId } = useEditorStore();
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export function ApollonCanvas({
       editorRef.current = editor;
       onEditorReady?.(editor);
 
-      const subModel = editor.subscribeToModelChange((apollonModel) => {
+      subModelRef.current = editor.subscribeToModelChange((apollonModel) => {
         try {
           const mcu = fromApollon(apollonModel);
           onModelChange(mcu);
@@ -42,30 +42,41 @@ export function ApollonCanvas({
         }
       });
 
-      const subSel = editor.subscribeToSelectionChange((selectedElementIds: string[]) => {
-        setSelectedId(selectedElementIds[0] ?? null);
+      subSelRef.current = editor.subscribeToSelectionChange((selectedIds: string[]) => {
+        setSelectedId(selectedIds[0] ?? null);
       });
-
-      return () => {
-        editor.unsubscribe(subModel);
-        editor.unsubscribe(subSel);
-        editorRef.current = null;
-      };
     },
     [onModelChange, onEditorReady, setSelectedId],
   );
 
+  useEffect(() => {
+    return () => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      if (subModelRef.current !== null) editor.unsubscribe(subModelRef.current);
+      if (subSelRef.current !== null) editor.unsubscribe(subSelRef.current);
+      editorRef.current = null;
+    };
+  }, []);
+
+  if (!initialModel) {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center text-sm text-[var(--color-foreground-muted)]">
+        Cargando diagrama...
+      </div>
+    );
+  }
+
+  // Patrón oficial React Flow: absolute inset-0 dentro de un padre relative
   return (
-    <div className="w-full h-full relative overflow-hidden" aria-label="Canvas de diagrama UML" role="application">
+    <div className="absolute inset-0">
       <Apollon
         style={{ width: '100%', height: '100%' }}
+
         defaultModel={toApollon(initialModel)}
-        model={model ? toApollon(model) : undefined}
         defaultType={UMLDiagramType.ClassDiagram}
-        readonly={readOnly}
         onMount={handleMount}
       />
     </div>
   );
 }
-
