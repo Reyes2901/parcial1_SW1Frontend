@@ -38,7 +38,14 @@ export function useAIChat(diagramId: string) {
         setPendingCommands(res.commands);
       }
     },
-    onError: () => toast.error('Error al procesar el comando de IA.'),
+    onError: (err: unknown) => {
+      const appErr = err as { status?: number; code?: string };
+      if (appErr.status === 503 && appErr.code === 'AI_NOT_CONFIGURED') {
+        toast.error('El asistente IA no está configurado. Contacta al administrador.');
+      } else {
+        toast.error('Error al procesar el comando de IA.');
+      }
+    },
     retry: 0,
   });
 

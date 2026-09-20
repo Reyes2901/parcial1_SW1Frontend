@@ -73,12 +73,12 @@ async function parseResponse<T>(
   return res.json() as Promise<T>;
 }
 
-function buildHeaders(extra?: HeadersInit): HeadersInit {
+function buildHeaders(hasBody: boolean, extra?: HeadersInit): HeadersInit {
   const token = getToken();
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(extra as Record<string, string> ?? {}),
   };
+  if (hasBody) headers['Content-Type'] = 'application/json';
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
 }
@@ -102,11 +102,12 @@ async function request<T>(
   const ms = isLongRequest(path) ? 120_000 : 30_000;
   const ctrl = timeout(ms);
   const signal = opts?.signal ?? ctrl.signal;
+  const hasBody = body !== undefined;
 
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
-    headers: buildHeaders(opts?.headers),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    headers: buildHeaders(hasBody, opts?.headers),
+    body: hasBody ? JSON.stringify(body) : undefined,
     signal,
     ...opts,
   });

@@ -28,6 +28,8 @@ export interface UMLClass {
   attributes: UMLAttribute[];
   methods: UMLMethod[];
   position: { x: number; y: number };
+  width?: number;
+  height?: number;
 }
 
 export type RelationKind =
@@ -51,6 +53,8 @@ export interface UMLRelation {
   targetRole?: string;
   name?: string;
   attributes?: UMLAttribute[]; // N:M con atributos → backend rechaza con 400
+  sourceHandle?: string;
+  targetHandle?: string;
 }
 
 export interface UMLModel {

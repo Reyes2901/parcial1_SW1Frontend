@@ -35,12 +35,18 @@ export const diagramsService = {
     apiClient.post<LockResponse>(`/diagrams/${id}/locks`, { classId }),
   releaseLock: (id: string, classId: string) =>
     apiClient.delete<void>(`/diagrams/${id}/locks/${classId}`),
-  aiCommand: (id: string, prompt: string, model: UMLModel) =>
-    apiClient.post<AICommandResponse>(`/diagrams/${id}/ai/command`, { prompt, model }),
+  aiCommand: (id: string, message: string, model: UMLModel) =>
+    apiClient.post<AICommandResponse>(`/diagrams/${id}/ai/command`, { message, model }),
   aiUndo: (id: string) => apiClient.post<void>(`/diagrams/${id}/ai/undo`),
   importXmi: (id: string, xmi: string) =>
     apiClient.post<UMLCommand[]>(`/diagrams/${id}/import/xmi`, { xmi }),
   importImage: (id: string, base64: string, mimeType: string) =>
     apiClient.post<UMLCommand[]>(`/diagrams/${id}/import/image`, { image: base64, mimeType }),
   generate: (id: string) => apiClient.post<{ generationId: string }>(`/diagrams/${id}/generate`),
+  rename: (id: string, name: string) =>
+    apiClient.put<Diagram>(`/diagrams/${id}/rename`, { name }),
+  delete: (id: string) =>
+    apiClient.delete<void>(`/diagrams/${id}`),
+  duplicate: (id: string) =>
+    apiClient.post<Diagram>(`/diagrams/${id}/duplicate`),
 };

@@ -135,12 +135,13 @@ export function toApollon(model: UMLModel): ApollonUMLModel {
   const nodes: ApollonNode[] = (model.classes || []).map((cls) => {
     const attrCount = cls.attributes?.length || 0;
     const methodCount = cls.methods?.length || 0;
-    const height = 100 + Math.max(0, attrCount * 25 + methodCount * 25);
+    const width = cls.width ?? 220;
+    const height = cls.height ?? (80 + attrCount * 24 + methodCount * 24);
 
     return {
       id: cls.id,
       type: 'class' as ApollonNode['type'],
-      width: 160,
+      width,
       height,
       position: { x: cls.position?.x ?? 100, y: cls.position?.y ?? 100 },
       data: {
@@ -159,7 +160,7 @@ export function toApollon(model: UMLModel): ApollonUMLModel {
         })),
         _mcuClass: cls,
       },
-      measured: { width: 160, height },
+      measured: { width, height },
     };
   });
 
@@ -168,8 +169,8 @@ export function toApollon(model: UMLModel): ApollonUMLModel {
     source: rel.sourceClassId,
     target: rel.targetClassId,
     type: mapKindToEdgeType(rel.kind),
-    sourceHandle: 'bottom',
-    targetHandle: 'top',
+    sourceHandle: rel.sourceHandle ?? 'right',
+    targetHandle: rel.targetHandle ?? 'left',
     data: {
       label: rel.name || '',
       sourceMultiplicity: rel.sourceCardinality || '',
@@ -252,6 +253,9 @@ export function fromApollon(apollonModel: ApollonUMLModel): UMLModel {
       };
     });
 
+    const width = node.width ?? node.measured?.width;
+    const height = node.height ?? node.measured?.height;
+
     return {
       id: node.id,
       name: String(data.name || mcuClass?.name || 'Class'),
@@ -259,6 +263,8 @@ export function fromApollon(apollonModel: ApollonUMLModel): UMLModel {
       attributes,
       methods,
       position: { x: node.position?.x ?? 0, y: node.position?.y ?? 0 },
+      width,
+      height,
     };
   });
 
@@ -277,6 +283,8 @@ export function fromApollon(apollonModel: ApollonUMLModel): UMLModel {
       targetRole: (data.targetRole as string) || mcuRel?.targetRole,
       name: (data.label as string) || mcuRel?.name,
       attributes: mcuRel?.attributes,
+      sourceHandle: edge.sourceHandle || mcuRel?.sourceHandle,
+      targetHandle: edge.targetHandle || mcuRel?.targetHandle,
     };
   });
 
