@@ -15,7 +15,6 @@ export function useDebouncedSave(
   const saveFnRef = useRef(saveFn);
   const { setSaveStatus } = useEditorStore();
 
-  // Mantener saveFn actualizado SIN cambiar de identidad los callbacks
   useEffect(() => {
     saveFnRef.current = saveFn;
   }, [saveFn]);
@@ -58,24 +57,22 @@ export function useDebouncedSave(
 
   const scheduleSave = useCallback((model: UMLModel) => {
     pendingRef.current = model;
+    setSaveStatus('saving');
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       void flush();
     }, DEBOUNCE_MS);
-  }, [flush]);
+  }, [flush, setSaveStatus]);
 
-  // Cleanup: SOLO al desmontar de verdad, deps vacías
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      // Flush final — dispara el último pendiente, sin loop
       const model = pendingRef.current;
       if (model && failCountRef.current < MAX_FAILS) {
-        void saveFnRef.current(model).catch(() => { /* ignorar */ });
+        Promise.resolve(saveFnRef.current(model)).catch(() => { /* ignorar */ });
       }
       pendingRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { scheduleSave, flush };
