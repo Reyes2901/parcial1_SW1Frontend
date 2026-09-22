@@ -7,6 +7,7 @@ import { ErrorState } from '../../../../components/ui/ErrorState';
 import { Button } from '../../../../components/ui/Button';
 import { Modal } from '../../../../components/ui/Modal';
 import { Input } from '../../../../components/ui/Input';
+import { Select } from '../../../../components/ui/Select';
 import {
   Plus,
   ChevronLeft,
@@ -17,6 +18,7 @@ import {
   Share2,
   Trash2,
   ExternalLink,
+  Users,
 } from 'lucide-react';
 import { cn } from '../../../../lib/cn';
 import { formatRelativeDate } from '../../../../lib/format';
@@ -24,6 +26,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { diagramsService, type Diagram } from '../../../../services/diagrams.service';
 import { queryKeys } from '../../../../lib/query-keys';
 import { toast } from 'sonner';
+import { apiClient } from '../../../../services/api-client';
 
 type Tab = 'diagrams' | 'members' | 'activity' | 'settings';
 
@@ -41,7 +44,12 @@ export default function ProjectDetailPage() {
   const [renameDiagram, setRenameDiagram] = useState<Diagram | null>(null);
   const [renameName, setRenameName] = useState('');
 
-  // Share Modal state
+  // Share Modal state (compartir proyecto con invitación real)
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareRole, setShareRole] = useState<'editor' | 'viewer'>('editor');
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  // Share diagram (opens project share modal)
   const [shareDiagram, setShareDiagram] = useState<Diagram | null>(null);
 
   // Delete Modal state
@@ -321,24 +329,46 @@ export default function ProjectDetailPage() {
 
             {activeTab === 'members' && (
               <div>
-                <h3 className="font-semibold text-lg text-[var(--color-foreground)] mb-4">Miembros</h3>
-                {membersQuery.data?.map((m) => (
-                  <div
-                    key={m.id}
-                    className="flex items-center gap-3 p-3 mb-2 bg-[var(--color-secondary)] border border-[var(--color-border)] rounded-[var(--radius-card)]"
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-lg text-[var(--color-foreground)]">Miembros</h3>
+                  <Button
+                    size="sm"
+                    leftIcon={<Users className="h-3.5 w-3.5" />}
+                    onClick={() => {
+                      setShareLink(null);
+                      setShareRole('editor');
+                      setShareOpen(true);
+                    }}
                   >
-                    <div className="h-8 w-8 rounded-full bg-[var(--color-primary-muted)] flex items-center justify-center text-sm font-medium text-[var(--color-primary)]">
-                      {(m.name ?? m.email ?? '?').charAt(0).toUpperCase()}
+                    Invitar
+                  </Button>
+                </div>
+                {membersQuery.isLoading && <Spinner />}
+                {membersQuery.data?.length === 0 && (
+                  <p className="text-sm text-[var(--color-foreground-muted)]">No hay miembros aún.</p>
+                )}
+                {membersQuery.data?.map((m) => {
+                  // El backend devuelve { user: { name, email, avatarUrl }, role }
+                  const name = (m as unknown as { user?: { name?: string; email?: string } }).user?.name ?? m.name ?? 'Sin nombre';
+                  const email = (m as unknown as { user?: { email?: string } }).user?.email ?? m.email ?? '—';
+                  return (
+                    <div
+                      key={m.id}
+                      className="flex items-center gap-3 p-3 mb-2 bg-[var(--color-secondary)] border border-[var(--color-border)] rounded-[var(--radius-card)]"
+                    >
+                      <div className="h-8 w-8 rounded-full bg-[var(--color-primary-muted)] flex items-center justify-center text-sm font-medium text-[var(--color-primary)]">
+                        {(name).charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{name}</p>
+                        <p className="text-xs text-[var(--color-foreground-muted)]">{email}</p>
+                      </div>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-primary)] font-medium">
+                        {m.role}
+                      </span>
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{m.name ?? 'Sin nombre'}</p>
-                      <p className="text-xs text-[var(--color-foreground-muted)]">{m.email ?? '—'}</p>
-                    </div>
-                    <span className="text-xs px-2.5 py-1 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-primary)] font-medium">
-                      {m.role}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -430,36 +460,84 @@ export default function ProjectDetailPage() {
         </form>
       </Modal>
 
-      {/* Modal: Compartir Diagrama */}
+      {/* Modal: Compartir Proyecto (invitación real) */}
       <Modal
-        open={!!shareDiagram}
-        onClose={() => setShareDiagram(null)}
-        title="Compartir diagrama"
-        description="Enlace directo para acceder al editor de este diagrama."
+        open={shareOpen || !!shareDiagram}
+        onClose={() => { setShareOpen(false); setShareDiagram(null); setShareLink(null); }}
+        title="Invitar al proyecto"
+        description="Genera un enlace de invitación para que otros usuarios se unan al proyecto."
       >
         <div className="flex flex-col gap-4">
-          <Input
-            label="Enlace del editor"
-            value={shareDiagram ? `${window.location.origin}/editor/${shareDiagram.id}` : ''}
-            readOnly
-          />
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setShareDiagram(null)}>
-              Cerrar
-            </Button>
-            <Button
-              type="button"
-              leftIcon={<Copy className="h-4 w-4" />}
-              onClick={() => {
-                if (shareDiagram) {
-                  navigator.clipboard.writeText(`${window.location.origin}/editor/${shareDiagram.id}`);
-                  toast.success('Link copiado');
-                }
-              }}
-            >
-              Copiar enlace
-            </Button>
-          </div>
+          {!shareLink ? (
+            <>
+              <Select
+                label="Rol"
+                value={shareRole}
+                onChange={(e) => setShareRole(e.target.value as 'editor' | 'viewer')}
+                options={[
+                  { value: 'editor', label: 'Editor — puede editar diagramas' },
+                  { value: 'viewer', label: 'Viewer — solo lectura' },
+                ]}
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => { setShareOpen(false); setShareDiagram(null); }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  loading={shareLoading}
+                  leftIcon={<Share2 className="h-4 w-4" />}
+                  onClick={async () => {
+                    if (!projectId) return;
+                    setShareLoading(true);
+                    try {
+                      const res = await apiClient.post<{ token: string }>(
+                        `/projects/${projectId}/invitations`,
+                        { role: shareRole }
+                      );
+                      setShareLink(`${window.location.origin}/join/${res.token}`);
+                    } catch (err) {
+                      toast.error((err as Error)?.message || 'Error al generar el link');
+                    } finally {
+                      setShareLoading(false);
+                    }
+                  }}
+                >
+                  Generar enlace
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <Input label="Enlace de invitación" value={shareLink} readOnly />
+              <p className="text-xs text-[var(--color-foreground-muted)]">
+                Este enlace permite unirse al proyecto con rol <strong>{shareRole}</strong>.
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => { setShareOpen(false); setShareDiagram(null); setShareLink(null); }}
+                >
+                  Cerrar
+                </Button>
+                <Button
+                  type="button"
+                  leftIcon={<Copy className="h-4 w-4" />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(shareLink);
+                    toast.success('Link de invitación copiado');
+                  }}
+                >
+                  Copiar enlace
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 

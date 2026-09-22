@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Bot, RotateCcw } from 'lucide-react';
+import { X, Send, Bot, RotateCcw, Mic, MicOff } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AIMessage } from './AIMessage';
 import { AICommandPreview } from './AICommandPreview';
 import { useAIChat } from '../../hooks/useAIChat';
+import { useVoiceInput } from '../../hooks/useVoiceInput';
 import type { UMLModel } from '../../domain/uml-model';
 
 interface AIAssistantPanelProps {
@@ -23,7 +24,18 @@ const SUGGESTIONS = [
 export function AIAssistantPanel({ diagramId, model, onClose, onApplyCommands }: AIAssistantPanelProps) {
   const [input, setInput] = useState('');
   const { messages, pendingCommands, isLoading, sendMessage, confirmCommands, rejectCommands, undo } = useAIChat(diagramId);
+  const { isRecording, supported, start, stop } = useVoiceInput();
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const handleMic = () => {
+    if (isRecording) {
+      stop();
+    } else {
+      start((text) => {
+        setInput((prev) => (prev ? `${prev} ${text}` : text));
+      });
+    }
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -105,6 +117,21 @@ export function AIAssistantPanel({ diagramId, model, onClose, onApplyCommands }:
       {/* Composer */}
       <div className="p-3 border-t border-[var(--color-border)]">
         <div className="flex gap-2">
+          {supported && (
+            <button
+              type="button"
+              onClick={handleMic}
+              title="Dictar comando por voz"
+              aria-label="Dictar comando por voz"
+              className={`flex items-center justify-center p-2 rounded-[var(--radius-control)] border border-[var(--color-border)] transition-all ${
+                isRecording
+                  ? 'bg-[var(--color-danger)] text-white animate-pulse border-transparent'
+                  : 'bg-[var(--color-background)] text-[var(--color-foreground-muted)] hover:text-[var(--color-foreground)]'
+              }`}
+            >
+              {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </button>
+          )}
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}

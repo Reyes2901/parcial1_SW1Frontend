@@ -5,7 +5,12 @@ import { useAuthStore } from '../stores/auth.store';
 
 const REFRESH_INTERVAL_MS = 15_000;
 
-export function useLock(diagramId: string) {
+interface UseLockOptions {
+  enabled?: boolean;
+}
+
+export function useLock(diagramId: string, options: UseLockOptions = {}) {
+  const { enabled = true } = options;
   const { selectedId, setLockState } = useEditorStore();
   const { user } = useAuthStore();
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -32,6 +37,8 @@ export function useLock(diagramId: string) {
   }, [diagramId, setLockState]);
 
   useEffect(() => {
+    if (!enabled) return;
+
     if (!selectedId) {
       if (currentClassId.current) {
         void releaseLock(currentClassId.current);
@@ -56,7 +63,7 @@ export function useLock(diagramId: string) {
     return () => {
       if (refreshRef.current) clearInterval(refreshRef.current);
     };
-  }, [selectedId, acquireLock, releaseLock]);
+  }, [enabled, selectedId, acquireLock, releaseLock]);
 
   // Liberar al desmontar
   useEffect(() => {

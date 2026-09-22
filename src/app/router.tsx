@@ -13,6 +13,7 @@ const SettingsPage = lazy(() => import('./routes/settings/SettingsPage'));
 const GenerationPage = lazy(() => import('./routes/generations/GenerationPage'));
 const TemplatesPage = lazy(() => import('./routes/templates/TemplatesPage'));
 const ActivityPage = lazy(() => import('./routes/activity/ActivityPage'));
+const JoinPage = lazy(() => import('./routes/join/JoinPage'));
 
 const LoadingFallback = () => (
   <div className="flex items-center justify-center h-screen bg-[var(--color-background)]">
@@ -53,6 +54,11 @@ export const router = createBrowserRouter([
   {
     path: '/editor/:diagramId',
     element: <Protected><EditorPage /></Protected>,
+  },
+  {
+    // Ruta pública: no envuelta en Protected para que el flujo de redirect al login funcione
+    path: '/join/:token',
+    element: <Suspense fallback={<LoadingFallback />}><JoinPage /></Suspense>,
   },
   {
     path: '*',

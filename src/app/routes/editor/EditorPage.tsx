@@ -2,12 +2,14 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  ChevronLeft, Bot, Upload, Code, CheckCircle, Loader, AlertCircle,
+  ChevronLeft, Bot, Upload, Code, CheckCircle, Loader, AlertCircle, Send, Users, RefreshCw,
 } from 'lucide-react';
 import { useDiagram, useSaveDiagram } from '../../../hooks/useDiagram';
 import { useDebouncedSave } from '../../../hooks/useDebouncedSave';
 import { useLock } from '../../../hooks/useLock';
+import { useCollaboration } from '../../../hooks/useCollaboration';
 import { useEditorStore } from '../../../stores/editor.store';
+import { useAuthStore } from '../../../stores/auth.store';
 import { ApollonCanvas } from '../../../components/uml/ApollonCanvas';
 import { InspectorPanel } from '../../../components/uml/InspectorPanel';
 import { AIAssistantPanel } from '../../../components/ai/AIAssistantPanel';
@@ -15,6 +17,7 @@ import { ImportDialog } from '../../../components/import/ImportDialog';
 import { Spinner } from '../../../components/ui/Spinner';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { diagramsService } from '../../../services/diagrams.service';
+import { generationService } from '../../../services/generation.service';
 import { applyCommands } from '../../../lib/apply-commands';
 import type { UMLModel } from '../../../domain/uml-model';
 import type { UMLCommand } from '../../../domain/uml-command';
@@ -33,10 +36,24 @@ export default function EditorPage() {
   const diagramQuery = useDiagram(diagramId!);
   const saveMutation = useSaveDiagram(diagramId!);
   const { saveStatus, activePanel, setActivePanel } = useEditorStore();
+  const { token } = useAuthStore();
   const [currentModel, setCurrentModel] = useState<UMLModel | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [latestGenId, setLatestGenId] = useState<string | null>(null);
+  const [incomingMessage, setIncomingMessage] = useState<{ data: string; id: number } | null>(null);
+  const incomingIdRef = useRef(0);
 
-  useLock(diagramId!);
+  const collaboration = useCollaboration({
+    diagramId: diagramId!,
+    token,
+    onMessage: (data) => {
+      incomingIdRef.current += 1;
+      setIncomingMessage({ data, id: incomingIdRef.current });
+    },
+  });
+
+  // Locks solo si NO hay colaboración activa (Yjs maneja la concurrencia)
+  useLock(diagramId!, { enabled: collaboration.state !== 'connected' });
 
   // Ref que mantiene la versión actual del DIAGRAMA (no del MCU)
   const versionRef = useRef<number>(1);
@@ -85,11 +102,36 @@ export default function EditorPage() {
     try {
       toast.info('Generación iniciada');
       const res = await diagramsService.generate(diagramId);
+      setLatestGenId(res.generationId);
       navigate(`/generations/${res.generationId}`);
     } catch (err: unknown) {
       toast.error((err as Error)?.message || 'Error al iniciar la generación de código');
     }
   };
+
+  const handleDownloadPostman = async () => {
+    if (!diagramId) return;
+    try {
+      let genId = latestGenId;
+      if (!genId) {
+        toast.info('Generando colección Postman…');
+        const res = await diagramsService.generate(diagramId);
+        genId = res.generationId;
+        setLatestGenId(genId);
+      }
+      const downloadUrl = generationService.download(genId);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.setAttribute('download', `generation-${genId}.zip`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success('Descargando ZIP con Postman collection');
+    } catch (err: unknown) {
+      toast.error((err as Error)?.message || 'Error al descargar colección Postman');
+    }
+  };
+
   if (diagramQuery.isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -121,6 +163,35 @@ export default function EditorPage() {
         <span className="text-white/30">/</span>
         <span className="text-sm font-medium text-white">{diagram.name}</span>
         <div className="flex-1" />
+
+        {/* Connection status badge */}
+        <div className="flex items-center gap-1.5 rounded-[var(--radius-control)] bg-white/10 px-2.5 py-1 text-xs font-medium text-white/80">
+          {collaboration.state === 'connected' && (
+            <>
+              <span className="h-2 w-2 rounded-full bg-[var(--color-success)]" />
+              <Users className="h-3.5 w-3.5 text-white/70" />
+              <span>Conectado ({collaboration.peerCount})</span>
+            </>
+          )}
+          {collaboration.state === 'connecting' && (
+            <>
+              <span className="h-2 w-2 rounded-full bg-[var(--color-warning)] animate-pulse" />
+              <span>Conectando…</span>
+            </>
+          )}
+          {(collaboration.state === 'disconnected' || collaboration.state === 'error') && (
+            <button
+              onClick={collaboration.reconnect}
+              className="flex items-center gap-1 text-red-300 hover:text-white transition-colors"
+              title="Reconectar colaboración"
+            >
+              <span className="h-2 w-2 rounded-full bg-[var(--color-danger)]" />
+              <span>Desconectado</span>
+              <RefreshCw className="h-3 w-3 ml-1" />
+            </button>
+          )}
+        </div>
+
         <div className="flex items-center gap-1.5 text-xs text-white/60">
           {SAVE_STATUS_ICON[saveStatus]}
           <span>
@@ -147,16 +218,19 @@ export default function EditorPage() {
           Importar
         </button>
         <button
-          onClick={async () => {
-            if (model) {
-              const res = await diagramsService.generate(diagramId!);
-              window.open(`/generations/${res.generationId}`, '_blank');
-            }
-          }}
+          onClick={handleGenerateCode}
           className="flex items-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--color-icon)] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
         >
           <Code className="h-4 w-4" />
           Generar código
+        </button>
+        <button
+          onClick={handleDownloadPostman}
+          className="flex items-center gap-1.5 rounded-[var(--radius-control)] bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/20"
+          title="Descargar colección Postman (ZIP)"
+        >
+          <Send className="h-4 w-4" />
+          Descargar Postman
         </button>
       </div>
 
@@ -165,8 +239,12 @@ export default function EditorPage() {
         {/* Canvas wrapper: RELATIVE (obligatorio para absolute inset-0) */}
         <div className="relative min-w-0 flex-1 overflow-hidden bg-[var(--color-background)]">
           <ApollonCanvas
+            key={`canvas-${collaboration.state === 'connected' ? 'collab' : 'solo'}`}
             initialModel={model}
             onModelChange={handleModelChange}
+            incomingMessage={incomingMessage}
+            onOutgoingMessage={collaboration.send}
+            collaborationEnabled={collaboration.state === 'connected'}
           />
         </div>
 
