@@ -10,7 +10,9 @@ import { generationService } from '../../services/generation.service';
 import type { GenerationFile } from '../../services/generation.service';
 import { cn } from '../../lib/cn';
 
-interface GenerationWorkbenchProps { generationId: string; }
+interface GenerationWorkbenchProps {
+  generationId: string;
+}
 
 const STATUS_LABELS = {
   queued: { label: 'En cola', color: 'text-[var(--color-warning)]' },
@@ -25,14 +27,37 @@ export function GenerationWorkbench({ generationId }: GenerationWorkbenchProps) 
   const [content, setContent] = useState('');
 
   const gen = generationQuery.data;
-  const files = filesQuery.data ?? [];
-
+  // Normalizar: el backend devuelve Record<string,string>, esperamos array
+  const rawFiles = filesQuery.data;
+  const files: GenerationFile[] = Array.isArray(rawFiles)
+    ? rawFiles
+    : rawFiles && typeof rawFiles === 'object' && 'files' in (rawFiles as any)
+      ? Object.entries((rawFiles as any).files).map(([path, content]) => ({
+        path,
+        content: content as string,
+        language: path.endsWith('.java') ? 'java'
+          : path.endsWith('.xml') ? 'xml'
+            : path.endsWith('.yml') || path.endsWith('.yaml') ? 'yaml'
+              : path.endsWith('.md') ? 'markdown'
+                : path.endsWith('.json') ? 'json'
+                  : 'plaintext',
+      }))
+      : [];
   if (generationQuery.isLoading) {
-    return <div className="flex items-center justify-center h-full"><Spinner size="lg" /></div>;
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Spinner size="lg" />
+      </div>
+    );
   }
 
   if (generationQuery.isError) {
-    return <ErrorState message="No se pudo cargar la generación." onRetry={() => generationQuery.refetch()} />;
+    return (
+      <ErrorState
+        message="No se pudo cargar la generación."
+        onRetry={() => generationQuery.refetch()}
+      />
+    );
   }
 
   const status = gen?.status ?? 'queued';
@@ -43,7 +68,9 @@ export function GenerationWorkbench({ generationId }: GenerationWorkbenchProps) 
       <div className="flex flex-col items-center justify-center h-full gap-4">
         <Spinner size="lg" />
         <p className={cn('text-sm font-medium', statusMeta.color)}>{statusMeta.label}</p>
-        <p className="text-xs text-[var(--color-foreground-muted)]">Generando código Spring Boot…</p>
+        <p className="text-xs text-[var(--color-foreground-muted)]">
+          Generando código Spring Boot…
+        </p>
       </div>
     );
   }
@@ -62,12 +89,30 @@ export function GenerationWorkbench({ generationId }: GenerationWorkbenchProps) 
     patchMutation.mutate({ filePath: selectedFile.path, content });
   };
 
+  const handleDownloadZip = async () => {
+    try {
+      const blob = await generationService.download(generationId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `generation-${generationId}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download failed', err);
+    }
+  };
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* File tree */}
       <div className="w-60 flex-shrink-0 border-r border-[var(--color-border)] overflow-y-auto bg-[var(--color-secondary)]">
         <div className="p-3 border-b border-[var(--color-border)]">
-          <p className="text-xs font-semibold text-[var(--color-foreground-muted)] uppercase tracking-wider">Archivos</p>
+          <p className="text-xs font-semibold text-[var(--color-foreground-muted)] uppercase tracking-wider">
+            Archivos
+          </p>
         </div>
         <FileTree files={files} selectedPath={selectedFile?.path} onSelect={handleSelectFile} />
       </div>
@@ -85,14 +130,13 @@ export function GenerationWorkbench({ generationId }: GenerationWorkbenchProps) 
                 Guardar
               </Button>
             )}
-            <a
-              href={generationService.download(generationId)}
-              download
+            <button
+              onClick={handleDownloadZip}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[var(--color-secondary)] border border-[var(--color-border)] rounded-[var(--radius-control)] hover:bg-[var(--color-background-hover)] transition-colors"
             >
               <Download className="h-3.5 w-3.5" />
               Descargar ZIP
-            </a>
+            </button>
           </div>
         </div>
 

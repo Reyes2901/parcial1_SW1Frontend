@@ -27,8 +27,8 @@ export const diagramsService = {
   get: (id: string) => apiClient.get<Diagram>(`/diagrams/${id}`),
   create: (projectId: string, payload: { name: string }) =>
     apiClient.post<Diagram>(`/projects/${projectId}/diagrams`, payload),
-  save: (id: string, umlModel: UMLModel, version: number) =>
-    apiClient.put<Diagram>(`/diagrams/${id}`, { umlModel, version }),
+  save: (id: string, umlModel: UMLModel, version?: number) =>
+    apiClient.put<Diagram>(`/diagrams/${id}`, { umlModel, version, expectedVersion: version }),
   versions: (id: string) => apiClient.get<DiagramVersion[]>(`/diagrams/${id}/versions`),
   createVersion: (id: string) => apiClient.post(`/diagrams/${id}/versions`),
   acquireLock: (id: string, classId: string) =>
@@ -43,6 +43,13 @@ export const diagramsService = {
   importImage: (id: string, base64: string, mimeType: string) =>
     apiClient.post<UMLCommand[]>(`/diagrams/${id}/import/image`, { image: base64, mimeType }),
   generate: (id: string) => apiClient.post<{ generationId: string }>(`/diagrams/${id}/generate`),
+  aiCommandFromImage: (id: string, image: string, mimeType: string, message?: string) =>
+    apiClient.post<AICommandResponse>(`/diagrams/${id}/ai/from-image`, { image, mimeType, message }),
+  aiCommandFromAudio: (id: string, audio: string, mimeType: string) =>
+    apiClient.post<AICommandResponse & { transcription: string }>(
+      `/diagrams/${id}/ai/from-audio`,
+      { audio, mimeType },
+    ),
   rename: (id: string, name: string) =>
     apiClient.put<Diagram>(`/diagrams/${id}/rename`, { name }),
   delete: (id: string) =>

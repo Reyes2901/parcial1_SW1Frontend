@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { diagramsService } from '../services/diagrams.service';
 import type { UMLModel } from '../domain/uml-model';
@@ -16,6 +16,8 @@ export interface ChatMessage {
 export function useAIChat(diagramId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingCommands, setPendingCommands] = useState<UMLCommand[] | null>(null);
+  // Guard síncrono contra doble envío (cierra la ventana de race antes de que isPending se actualice)
+  const isSendingRef = useRef(false);
 
   const sendMutation = useMutation({
     mutationFn: ({ prompt, model }: { prompt: string; model: UMLModel }) =>
@@ -66,7 +68,17 @@ export function useAIChat(diagramId: string) {
   }, []);
 
   const sendMessage = useCallback((prompt: string, model: UMLModel) => {
-    sendMutation.mutate({ prompt, model });
+    // Guard: retorna temprano si ya hay un envío en vuelo
+    if (isSendingRef.current || sendMutation.isPending) return;
+    isSendingRef.current = true;
+    sendMutation.mutate(
+      { prompt, model },
+      {
+        onSettled: () => {
+          isSendingRef.current = false;
+        },
+      },
+    );
   }, [sendMutation]);
 
   return {

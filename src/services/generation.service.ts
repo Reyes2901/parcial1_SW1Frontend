@@ -1,4 +1,5 @@
 import { apiClient, buildFilePatchPath } from './api-client';
+import { useAuthStore } from '../stores/auth.store';
 
 export interface GenerationFile {
   path: string;
@@ -20,5 +21,13 @@ export const generationService = {
   files: (id: string) => apiClient.get<GenerationFile[]>(`/generations/${id}/files`),
   patchFile: (id: string, filePath: string, content: string) =>
     apiClient.patch<GenerationFile>(buildFilePatchPath(id, filePath), { content }),
-  download: (id: string) => `${import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}/generations/${id}/download`,
+  download: async (id: string) => {
+    const token = useAuthStore.getState().token;
+    const base = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+    const res = await fetch(`${base}/generations/${id}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    return res.blob();
+  },
 };

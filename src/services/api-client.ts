@@ -90,7 +90,12 @@ function timeout(ms: number): AbortController {
 }
 
 function isLongRequest(path: string): boolean {
-  return path.includes('/generate') || path.includes('/import');
+  return (
+    path.includes('/generate') ||
+    path.includes('/import') ||
+    path.includes('/ai/command') ||
+    path.includes('/ai/undo')
+  );
 }
 
 async function request<T>(

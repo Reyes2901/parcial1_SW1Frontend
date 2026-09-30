@@ -42,13 +42,10 @@ export function ApollonCanvas({
       isApplyingRemoteRef.current = true;
       try {
         editorRef.current!.receiveBroadcastedMessage(base64);
-      } catch (err) {
-        console.error('[ApollonCanvas] receiveBroadcastedMessage error:', err);
       } finally {
-        isApplyingRemoteRef.current = false;
+        setTimeout(() => { isApplyingRemoteRef.current = false; }, 150);
       }
     };
-
     try {
       const parsed = JSON.parse(incomingMessage.data);
 
@@ -95,7 +92,7 @@ export function ApollonCanvas({
 
       if (onOutgoingMessage) {
         editor.sendBroadcastMessage((base64Data: string) => {
-          console.log('[ApollonCanvas] sendBroadcastMessage fired, length:', base64Data.length);
+          if (isApplyingRemoteRef.current) return;  // ← no rebotar lo remoto
           onOutgoingMessage(base64Data);
         });
       }

@@ -149,7 +149,7 @@ export function AIAssistantPanel({ diagramId, model, onClose, onApplyCommands }:
             className="px-3"
             aria-label="Enviar mensaje"
           >
-            <Send className="h-4 w-4" />
+            {isLoading ? 'Pensando...' : <Send className="h-4 w-4" />}
           </Button>
         </div>
       </div>

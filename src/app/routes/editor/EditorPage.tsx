@@ -66,12 +66,21 @@ export default function EditorPage() {
   }, [diagramQuery.data?.version]);
 
   const saveFn = useCallback(async (umlModel: UMLModel) => {
-    const res = await saveMutation.mutateAsync({
-      umlModel,
-      version: versionRef.current,
-    });
-    versionRef.current = res.version;
-  }, [saveMutation]);
+    const isCollab = collaboration.state === 'connected';
+    const expectedVersion = isCollab ? undefined : versionRef.current;
+    console.log('[ver] before PUT', { isCollab, expectedVersion });
+    try {
+      const res = await saveMutation.mutateAsync({
+        umlModel,
+        version: expectedVersion,
+      });
+      console.log('[ver] after PUT 200', { newVersion: res.version });
+      versionRef.current = res.version;
+    } catch (err) {
+      console.log('[ver] after 409', { localVersion: versionRef.current });
+      throw err;
+    }
+  }, [collaboration.state, saveMutation]);
 
   const { scheduleSave } = useDebouncedSave(saveFn);
 
@@ -119,14 +128,14 @@ export default function EditorPage() {
         genId = res.generationId;
         setLatestGenId(genId);
       }
-      const downloadUrl = generationService.download(genId);
+      const blob = await generationService.download(genId);
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.setAttribute('download', `generation-${genId}.zip`);
-      document.body.appendChild(link);
+      link.href = url;
+      link.download = `postman-${genId}.zip`;
       link.click();
-      document.body.removeChild(link);
-      toast.success('Descargando ZIP con Postman collection');
+      URL.revokeObjectURL(url);
+      toast.success('Descargado');
     } catch (err: unknown) {
       toast.error((err as Error)?.message || 'Error al descargar colección Postman');
     }
@@ -239,6 +248,7 @@ export default function EditorPage() {
         {/* Canvas wrapper: RELATIVE (obligatorio para absolute inset-0) */}
         <div className="relative min-w-0 flex-1 overflow-hidden bg-[var(--color-background)]">
           <ApollonCanvas
+            //key={diagramId}
             key={`canvas-${collaboration.state === 'connected' ? 'collab' : 'solo'}`}
             initialModel={model}
             onModelChange={handleModelChange}

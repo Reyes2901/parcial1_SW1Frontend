@@ -16,7 +16,7 @@ export function useDiagram(id: string) {
 
 interface SavePayload {
   umlModel: UMLModel;
-  version: number;
+  version?: number;
 }
 
 export function useSaveDiagram(id: string) {
