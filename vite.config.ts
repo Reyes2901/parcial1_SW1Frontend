@@ -14,4 +14,7 @@ export default defineConfig({
       thresholds: { lines: 60, functions: 60 },
     },
   },
+  preview: {
+    allowedHosts: ['parcial1sw1frontend-production.up.railway.app'],
+  },
 })
