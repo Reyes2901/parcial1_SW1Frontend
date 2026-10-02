@@ -248,8 +248,7 @@ export default function EditorPage() {
         {/* Canvas wrapper: RELATIVE (obligatorio para absolute inset-0) */}
         <div className="relative min-w-0 flex-1 overflow-hidden bg-[var(--color-background)]">
           <ApollonCanvas
-            //key={diagramId}
-            key={`canvas-${collaboration.state === 'connected' ? 'collab' : 'solo'}`}
+            key={diagramId}
             initialModel={model}
             onModelChange={handleModelChange}
             incomingMessage={incomingMessage}
