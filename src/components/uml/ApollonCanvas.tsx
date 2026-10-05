@@ -7,6 +7,11 @@ import { useEditorStore } from '../../stores/editor.store';
 // Tiempo de bloqueo de isApplyingRemoteRef (ms).
 // Debe ser mayor que el tiempo máximo de procesamiento de un update Yjs en Apollon.
 const REMOTE_APPLY_LOCK_MS = 2000;
+console.log('🔵 ApollonCanvas RENDER', new Error().stack);
+useEffect(() => {
+  console.log('🟢 ApollonCanvas MOUNT', Date.now());
+  return () => console.log('🔴 ApollonCanvas UNMOUNT', Date.now());
+}, []);
 
 interface ApollonCanvasProps {
   initialModel: UMLModel | undefined;
