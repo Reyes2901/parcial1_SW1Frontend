@@ -23,7 +23,6 @@ import type { UMLModel } from '../../../domain/uml-model';
 import type { UMLCommand } from '../../../domain/uml-command';
 import { cn } from '../../../lib/cn';
 
-
 const SAVE_STATUS_ICON = {
   idle: null,
   saving: <Loader className="h-3.5 w-3.5 animate-spin text-[var(--color-foreground-muted)]" />,
@@ -53,13 +52,13 @@ export default function EditorPage() {
     },
   });
 
-  // Locks solo si NO hay colaboración activa (Yjs maneja la concurrencia)
+  // Locks solo si NO hay colaboración activa
   useLock(diagramId!, { enabled: collaboration.state !== 'connected' });
 
-  // Ref que mantiene la versión actual del DIAGRAMA (no del MCU)
+  // Ref que mantiene la versión actual del DIAGRAMA
   const versionRef = useRef<number>(1);
 
-  // Ref para collaboration.state — evita que saveFn sea re-creado en cada cambio de conexión WS
+  // Ref para collaboration.state — evita recrear saveFn en cada cambio de WS
   const collabStateRef = useRef(collaboration.state);
   useEffect(() => {
     collabStateRef.current = collaboration.state;
@@ -72,11 +71,45 @@ export default function EditorPage() {
     }
   }, [diagramQuery.data?.version]);
 
+  // Ref que mantiene el modelo más reciente para el save de despedida
+  const currentModelRef = useRef<UMLModel | null>(null);
+  useEffect(() => {
+    currentModelRef.current = currentModel;
+  }, [currentModel]);
+
+  // Guardar el estado al cerrar la pestaña / desmontar
+  useEffect(() => {
+    const persist = () => {
+      const m = currentModelRef.current;
+      if (!m) return;
+      try {
+        const token = useAuthStore.getState().token;
+        const apiBase = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+        fetch(`${apiBase}/diagrams/${diagramId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ umlModel: m }),
+          keepalive: true,
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+
+    window.addEventListener('beforeunload', persist);
+    return () => {
+      window.removeEventListener('beforeunload', persist);
+      persist();
+    };
+  }, [diagramId]);
+
   const saveFn = useCallback(async (umlModel: UMLModel) => {
-    // Leer el estado de colaboración desde la ref: NO es dependencia de useCallback
-    // Esto evita que saveFn se re-cree cada vez que el estado WS cambia,
-    // lo que rompía el loop: state-change → saveFn-new → scheduleSave-new → PUT espurio
     const isCollab = collabStateRef.current === 'connected';
+    // En colab: no enviamos version (evita 409 por carreras entre clientes).
+    // En solo: enviamos version para detectar conflictos.
     const expectedVersion = isCollab ? undefined : versionRef.current;
     console.log('[ver] before PUT', { isCollab, expectedVersion });
     try {
@@ -90,21 +123,18 @@ export default function EditorPage() {
       console.log('[ver] after 409', { localVersion: versionRef.current });
       throw err;
     }
-  // saveMutation es estable (useMutation no cambia de referencia)
-  // collabStateRef y versionRef son refs, no necesitan ir en deps
   }, [saveMutation]);
 
   const { scheduleSave } = useDebouncedSave(saveFn);
 
+  const lastModelJsonRef = useRef<string>('');
+
   const handleModelChange = useCallback((newModel: UMLModel) => {
-    setCurrentModel((prev) => {
-      // Si es idéntico al actual, no hacemos nada (evita re-render)
-      if (prev && JSON.stringify(prev) === JSON.stringify(newModel)) {
-        return prev;
-      }
-      scheduleSave(newModel);
-      return newModel;
-    });
+    const json = JSON.stringify(newModel);
+    if (json === lastModelJsonRef.current) return;
+    lastModelJsonRef.current = json;
+    setCurrentModel(newModel);
+    scheduleSave(newModel);
   }, [scheduleSave]);
 
   const diagram = diagramQuery.data;
@@ -123,6 +153,7 @@ export default function EditorPage() {
     () => currentModel ?? diagram?.umlModel ?? emptyModel,
     [currentModel, diagram?.umlModel, emptyModel],
   );
+
   const handleApplyCommands = useCallback((commands: UMLCommand[] | null) => {
     if (!commands || commands.length === 0 || !model) return;
     const updated = applyCommands(model, commands);
@@ -203,7 +234,11 @@ export default function EditorPage() {
             <>
               <span className="h-2 w-2 rounded-full bg-[var(--color-success)]" />
               <Users className="h-3.5 w-3.5 text-white/70" />
-              <span>Conectado ({collaboration.peerCount})</span>
+              <span>
+                {collaboration.peerCount === 1
+                  ? 'Conectado (tú)'
+                  : `Conectado (${collaboration.peerCount} usuarios)`}
+              </span>
             </>
           )}
           {collaboration.state === 'connecting' && (
@@ -267,9 +302,8 @@ export default function EditorPage() {
         </button>
       </div>
 
-      {/* Fila central: flex-1 + min-h-0 CRÍTICO + overflow-hidden */}
+      {/* Fila central */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Canvas wrapper: RELATIVE (obligatorio para absolute inset-0) */}
         <div className="relative min-w-0 flex-1 overflow-hidden bg-[var(--color-background)]">
           <ApollonCanvas
             key={diagramId}
@@ -281,7 +315,6 @@ export default function EditorPage() {
           />
         </div>
 
-        {/* Inspector */}
         {activePanel === 'inspector' && model && (
           <div className="flex w-72 shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-secondary)]">
             <div className="border-b border-[var(--color-border)] px-4 py-3">
@@ -297,7 +330,6 @@ export default function EditorPage() {
           </div>
         )}
 
-        {/* IA */}
         {activePanel === 'ai' && model && (
           <AIAssistantPanel
             diagramId={diagramId!}
@@ -327,4 +359,3 @@ export default function EditorPage() {
     </div>
   );
 }
-
