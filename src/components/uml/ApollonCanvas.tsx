@@ -4,15 +4,7 @@ import { toApollon, fromApollon } from '../../adapters/apollon-adapter';
 import type { UMLModel } from '../../domain/uml-model';
 import { useEditorStore } from '../../stores/editor.store';
 
-// Tiempo de bloqueo de isApplyingRemoteRef (ms).
-// Debe ser mayor que el tiempo máximo de procesamiento de un update Yjs en Apollon.
 const REMOTE_APPLY_LOCK_MS = 2000;
-console.log('🔵 ApollonCanvas RENDER', new Error().stack);
-console.log('🔵 ApollonCanvas RENDER', new Error().stack);
-useEffect(() => {
-  console.log('🟢 ApollonCanvas MOUNT', Date.now());
-  return () => console.log('🔴 ApollonCanvas UNMOUNT', Date.now());
-}, []);
 
 interface ApollonCanvasProps {
   initialModel: UMLModel | undefined;
@@ -42,7 +34,6 @@ export function ApollonCanvas({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { setSelectedId } = useEditorStore();
 
-  // ── Refs para callbacks: mantienen handleMount ESTABLE ──
   const onModelChangeRef = useRef(onModelChange);
   const onOutgoingMessageRef = useRef(onOutgoingMessage);
   const onEditorReadyRef = useRef(onEditorReady);
@@ -59,12 +50,10 @@ export function ApollonCanvas({
     }
   }, [readOnly]);
 
-  // ── Aplicar mensajes remotos ──
   useEffect(() => {
     if (!incomingMessage?.data || !editorRef.current) return;
 
     const applyRemote = (base64: string) => {
-      // Cancelar timer previo y extender el bloqueo
       if (remoteTimerRef.current) clearTimeout(remoteTimerRef.current);
       isApplyingRemoteRef.current = true;
       try {
@@ -80,7 +69,6 @@ export function ApollonCanvas({
       const parsed = JSON.parse(incomingMessage.data);
 
       if (parsed.type === 'send-full-state-to-peer') {
-        console.log('[ApollonCanvas] Servidor pide enviar estado completo');
         editorRef.current.broadcastFullState();
         return;
       }
@@ -94,16 +82,11 @@ export function ApollonCanvas({
     }
   }, [incomingMessage]);
 
-  // ── Handshake inicial (depende de collab + emisor estable vía ref) ──
-  // IMPORTANTE: Este efecto sólo corre cuando collaborationEnabled cambia de false→true.
-  // No se ejecuta en cada render gracias a las deps estables.
   useEffect(() => {
     if (!collaborationEnabled || !editorRef.current) return;
 
     const timer = setTimeout(() => {
       if (!editorRef.current) return;
-      console.log('[ApollonCanvas] Enviando handshake Yjs completo (una vez por conexión)');
-      // Bloquear subscribeToModelChange durante el handshake completo
       if (remoteTimerRef.current) clearTimeout(remoteTimerRef.current);
       isApplyingRemoteRef.current = true;
       onOutgoingMessageRef.current?.(ApollonEditor.generateInitialSyncMessage());
@@ -117,26 +100,16 @@ export function ApollonCanvas({
 
     return () => clearTimeout(timer);
   }, [collaborationEnabled]);
-  // ── handleMount: deps VACÍAS, todo por refs ──
+
   const handleMount = useCallback((editor: ApollonEditor) => {
     editorRef.current = editor;
     onEditorReadyRef.current?.(editor);
 
-    // Guardar el unsubscribe de sendBroadcastMessage para cleanup correcto
     const unsubBroadcast = editor.sendBroadcastMessage((base64Data: string) => {
       if (isApplyingRemoteRef.current) return;
       onOutgoingMessageRef.current?.(base64Data);
     });
-    // sendBroadcastMessage puede o no retornar un cleanup según la versión de Apollon
     unsubBroadcastRef.current = typeof unsubBroadcast === 'function' ? unsubBroadcast : null;
-
-    setTimeout(() => {
-      const state = (editor as any).ydoc?.getMap?.('diagram');
-      console.log('[ApollonCanvas] ydoc state after mount:', {
-        hasYdoc: !!state,
-        size: state?.size,
-      });
-    }, 1000);
 
     let lastNotifiedJson = '';
     subModelRef.current = editor.subscribeToModelChange((apollonModel) => {
@@ -144,11 +117,8 @@ export function ApollonCanvas({
       try {
         const mcu = fromApollon(apollonModel);
         const json = JSON.stringify(mcu);
-        if (json === lastNotifiedJson) {
-          return;  // ← cambio idéntico: NO notificar
-        }
+        if (json === lastNotifiedJson) return;
         lastNotifiedJson = json;
-        console.log('[ApollonCanvas] cambio real detectado, notificando');
         onModelChangeRef.current(mcu);
       } catch (err) {
         console.error('[ApollonCanvas] fromApollon error:', err);
@@ -158,12 +128,10 @@ export function ApollonCanvas({
     subSelRef.current = editor.subscribeToSelectionChange((selectedIds: string[]) => {
       setSelectedIdRef.current(selectedIds[0] ?? null);
     });
-  }, []); // ← ¡VACÍO!
+  }, []);
 
-  // ── Cleanup completo al desmontar ──
   useEffect(() => {
     return () => {
-      // Limpiar timer de bloqueo remoto
       if (remoteTimerRef.current) {
         clearTimeout(remoteTimerRef.current);
         remoteTimerRef.current = null;
@@ -174,7 +142,6 @@ export function ApollonCanvas({
       if (!editor) return;
       if (subModelRef.current !== null) editor.unsubscribe(subModelRef.current);
       if (subSelRef.current !== null) editor.unsubscribe(subSelRef.current);
-      // Limpiar sendBroadcastMessage si la librería lo soporta
       if (unsubBroadcastRef.current) {
         try { unsubBroadcastRef.current(); } catch { /* ignore */ }
         unsubBroadcastRef.current = null;
@@ -183,9 +150,6 @@ export function ApollonCanvas({
     };
   }, []);
 
-  // ── ResizeObserver: notifica a Apollon cuando el contenedor cambia de tamaño ──
-  // Necesario cuando se abre/cierra el inspector o panel IA
-  // DEBE ir antes del early return para cumplir Reglas de React (hooks antes de condicionales)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -193,7 +157,6 @@ export function ApollonCanvas({
     const ro = new ResizeObserver(() => {
       const editor = editorRef.current;
       if (!editor) return;
-      // Apollon puede exponer un método resize() o similar
       if (typeof (editor as any).resize === 'function') {
         (editor as any).resize();
       }
@@ -202,9 +165,9 @@ export function ApollonCanvas({
     return () => ro.disconnect();
   }, []);
 
-  // ── defaultModel memoizado para no recrear el objeto en cada render ──
   const defaultModel = useMemo(
     () => (initialModel ? toApollon(initialModel) : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [initialModel?.id],
   );
 
