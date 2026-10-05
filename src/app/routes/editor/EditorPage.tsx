@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -22,6 +22,7 @@ import { applyCommands } from '../../../lib/apply-commands';
 import type { UMLModel } from '../../../domain/uml-model';
 import type { UMLCommand } from '../../../domain/uml-command';
 import { cn } from '../../../lib/cn';
+
 
 const SAVE_STATUS_ICON = {
   idle: null,
@@ -90,15 +91,21 @@ export default function EditorPage() {
   }, [scheduleSave]);
 
   const diagram = diagramQuery.data;
-  const emptyModel: UMLModel = {
-    id: diagram?.id ?? '',
-    name: diagram?.name ?? 'Sin título',
-    version: 1,
-    classes: [],
-    relations: [],
-  };
-  const model = currentModel ?? diagram?.umlModel ?? emptyModel;
+  const emptyModel = useMemo<UMLModel>(
+    () => ({
+      id: diagram?.id ?? '',
+      name: diagram?.name ?? 'Sin título',
+      version: 1,
+      classes: [],
+      relations: [],
+    }),
+    [diagram?.id, diagram?.name],
+  );
 
+  const model = useMemo(
+    () => currentModel ?? diagram?.umlModel ?? emptyModel,
+    [currentModel, diagram?.umlModel, emptyModel],
+  );
   const handleApplyCommands = useCallback((commands: UMLCommand[] | null) => {
     if (!commands || commands.length === 0 || !model) return;
     const updated = applyCommands(model, commands);
