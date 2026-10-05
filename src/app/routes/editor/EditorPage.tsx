@@ -85,9 +85,15 @@ export default function EditorPage() {
 
   const { scheduleSave } = useDebouncedSave(saveFn);
 
-  const handleModelChange = useCallback((model: UMLModel) => {
-    setCurrentModel(model);
-    scheduleSave(model);
+  const handleModelChange = useCallback((newModel: UMLModel) => {
+    setCurrentModel((prev) => {
+      // Si es idéntico al actual, no hacemos nada (evita re-render)
+      if (prev && JSON.stringify(prev) === JSON.stringify(newModel)) {
+        return prev;
+      }
+      scheduleSave(newModel);
+      return newModel;
+    });
   }, [scheduleSave]);
 
   const diagram = diagramQuery.data;

@@ -55,7 +55,7 @@ export function ApollonCanvas({
       try {
         editorRef.current!.receiveBroadcastedMessage(base64);
       } finally {
-        setTimeout(() => { isApplyingRemoteRef.current = false; }, 150);
+        setTimeout(() => { isApplyingRemoteRef.current = false; }, 800);
       }
     };
     try {
@@ -83,14 +83,15 @@ export function ApollonCanvas({
     const timer = setTimeout(() => {
       if (!editorRef.current) return;
       console.log('[ApollonCanvas] Enviando handshake Yjs completo');
+      isApplyingRemoteRef.current = true;  // ← bloquear durante el handshake
       onOutgoingMessageRef.current?.(ApollonEditor.generateInitialSyncMessage());
       onOutgoingMessageRef.current?.(ApollonEditor.generateInitialAwarenessSyncMessage());
       editorRef.current.broadcastFullState();
+      setTimeout(() => { isApplyingRemoteRef.current = false; }, 1500);  // ← liberar después
     }, 100);
 
     return () => clearTimeout(timer);
   }, [collaborationEnabled]);
-
   // ── handleMount: deps VACÍAS, todo por refs ──
   const handleMount = useCallback((editor: ApollonEditor) => {
     editorRef.current = editor;
@@ -109,10 +110,17 @@ export function ApollonCanvas({
       });
     }, 1000);
 
+    let lastNotifiedJson = '';
     subModelRef.current = editor.subscribeToModelChange((apollonModel) => {
       if (isApplyingRemoteRef.current) return;
       try {
         const mcu = fromApollon(apollonModel);
+        const json = JSON.stringify(mcu);
+        if (json === lastNotifiedJson) {
+          return;  // ← cambio idéntico: NO notificar
+        }
+        lastNotifiedJson = json;
+        console.log('[ApollonCanvas] cambio real detectado, notificando');
         onModelChangeRef.current(mcu);
       } catch (err) {
         console.error('[ApollonCanvas] fromApollon error:', err);
