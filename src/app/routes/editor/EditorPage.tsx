@@ -59,6 +59,12 @@ export default function EditorPage() {
   // Ref que mantiene la versión actual del DIAGRAMA (no del MCU)
   const versionRef = useRef<number>(1);
 
+  // Ref para collaboration.state — evita que saveFn sea re-creado en cada cambio de conexión WS
+  const collabStateRef = useRef(collaboration.state);
+  useEffect(() => {
+    collabStateRef.current = collaboration.state;
+  }, [collaboration.state]);
+
   // Sincroniza con la versión del servidor cuando carga el diagrama
   useEffect(() => {
     if (diagramQuery.data?.version != null) {
@@ -67,7 +73,10 @@ export default function EditorPage() {
   }, [diagramQuery.data?.version]);
 
   const saveFn = useCallback(async (umlModel: UMLModel) => {
-    const isCollab = collaboration.state === 'connected';
+    // Leer el estado de colaboración desde la ref: NO es dependencia de useCallback
+    // Esto evita que saveFn se re-cree cada vez que el estado WS cambia,
+    // lo que rompía el loop: state-change → saveFn-new → scheduleSave-new → PUT espurio
+    const isCollab = collabStateRef.current === 'connected';
     const expectedVersion = isCollab ? undefined : versionRef.current;
     console.log('[ver] before PUT', { isCollab, expectedVersion });
     try {
@@ -81,7 +90,9 @@ export default function EditorPage() {
       console.log('[ver] after 409', { localVersion: versionRef.current });
       throw err;
     }
-  }, [collaboration.state, saveMutation]);
+  // saveMutation es estable (useMutation no cambia de referencia)
+  // collabStateRef y versionRef son refs, no necesitan ir en deps
+  }, [saveMutation]);
 
   const { scheduleSave } = useDebouncedSave(saveFn);
 

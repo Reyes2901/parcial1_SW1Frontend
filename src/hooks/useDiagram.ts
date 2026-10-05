@@ -9,7 +9,7 @@ export function useDiagram(id: string) {
   return useQuery({
     queryKey: queryKeys.diagram(id),
     queryFn: () => diagramsService.get(id),
-    staleTime: 0,
+    staleTime: Infinity,  // No refetch automático: setQueryData en onSuccess mantiene la caché fresca
     retry: 1,
   });
 }

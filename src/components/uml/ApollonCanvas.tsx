@@ -4,6 +4,10 @@ import { toApollon, fromApollon } from '../../adapters/apollon-adapter';
 import type { UMLModel } from '../../domain/uml-model';
 import { useEditorStore } from '../../stores/editor.store';
 
+// Tiempo de bloqueo de isApplyingRemoteRef (ms).
+// Debe ser mayor que el tiempo máximo de procesamiento de un update Yjs en Apollon.
+const REMOTE_APPLY_LOCK_MS = 2000;
+
 interface ApollonCanvasProps {
   initialModel: UMLModel | undefined;
   onModelChange: (model: UMLModel) => void;
@@ -25,8 +29,11 @@ export function ApollonCanvas({
 }: ApollonCanvasProps) {
   const editorRef = useRef<ApollonEditor | null>(null);
   const isApplyingRemoteRef = useRef(false);
+  const remoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subModelRef = useRef<number | null>(null);
   const subSelRef = useRef<number | null>(null);
+  const unsubBroadcastRef = useRef<(() => void) | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const { setSelectedId } = useEditorStore();
 
   // ── Refs para callbacks: mantienen handleMount ESTABLE ──
@@ -51,11 +58,16 @@ export function ApollonCanvas({
     if (!incomingMessage?.data || !editorRef.current) return;
 
     const applyRemote = (base64: string) => {
+      // Cancelar timer previo y extender el bloqueo
+      if (remoteTimerRef.current) clearTimeout(remoteTimerRef.current);
       isApplyingRemoteRef.current = true;
       try {
         editorRef.current!.receiveBroadcastedMessage(base64);
       } finally {
-        setTimeout(() => { isApplyingRemoteRef.current = false; }, 800);
+        remoteTimerRef.current = setTimeout(() => {
+          isApplyingRemoteRef.current = false;
+          remoteTimerRef.current = null;
+        }, REMOTE_APPLY_LOCK_MS);
       }
     };
     try {
@@ -77,17 +89,24 @@ export function ApollonCanvas({
   }, [incomingMessage]);
 
   // ── Handshake inicial (depende de collab + emisor estable vía ref) ──
+  // IMPORTANTE: Este efecto sólo corre cuando collaborationEnabled cambia de false→true.
+  // No se ejecuta en cada render gracias a las deps estables.
   useEffect(() => {
     if (!collaborationEnabled || !editorRef.current) return;
 
     const timer = setTimeout(() => {
       if (!editorRef.current) return;
-      console.log('[ApollonCanvas] Enviando handshake Yjs completo');
-      isApplyingRemoteRef.current = true;  // ← bloquear durante el handshake
+      console.log('[ApollonCanvas] Enviando handshake Yjs completo (una vez por conexión)');
+      // Bloquear subscribeToModelChange durante el handshake completo
+      if (remoteTimerRef.current) clearTimeout(remoteTimerRef.current);
+      isApplyingRemoteRef.current = true;
       onOutgoingMessageRef.current?.(ApollonEditor.generateInitialSyncMessage());
       onOutgoingMessageRef.current?.(ApollonEditor.generateInitialAwarenessSyncMessage());
       editorRef.current.broadcastFullState();
-      setTimeout(() => { isApplyingRemoteRef.current = false; }, 1500);  // ← liberar después
+      remoteTimerRef.current = setTimeout(() => {
+        isApplyingRemoteRef.current = false;
+        remoteTimerRef.current = null;
+      }, REMOTE_APPLY_LOCK_MS);
     }, 100);
 
     return () => clearTimeout(timer);
@@ -97,10 +116,13 @@ export function ApollonCanvas({
     editorRef.current = editor;
     onEditorReadyRef.current?.(editor);
 
-    editor.sendBroadcastMessage((base64Data: string) => {
+    // Guardar el unsubscribe de sendBroadcastMessage para cleanup correcto
+    const unsubBroadcast = editor.sendBroadcastMessage((base64Data: string) => {
       if (isApplyingRemoteRef.current) return;
       onOutgoingMessageRef.current?.(base64Data);
     });
+    // sendBroadcastMessage puede o no retornar un cleanup según la versión de Apollon
+    unsubBroadcastRef.current = typeof unsubBroadcast === 'function' ? unsubBroadcast : null;
 
     setTimeout(() => {
       const state = (editor as any).ydoc?.getMap?.('diagram');
@@ -132,21 +154,52 @@ export function ApollonCanvas({
     });
   }, []); // ← ¡VACÍO!
 
+  // ── Cleanup completo al desmontar ──
   useEffect(() => {
     return () => {
+      // Limpiar timer de bloqueo remoto
+      if (remoteTimerRef.current) {
+        clearTimeout(remoteTimerRef.current);
+        remoteTimerRef.current = null;
+      }
+      isApplyingRemoteRef.current = false;
+
       const editor = editorRef.current;
       if (!editor) return;
       if (subModelRef.current !== null) editor.unsubscribe(subModelRef.current);
       if (subSelRef.current !== null) editor.unsubscribe(subSelRef.current);
+      // Limpiar sendBroadcastMessage si la librería lo soporta
+      if (unsubBroadcastRef.current) {
+        try { unsubBroadcastRef.current(); } catch { /* ignore */ }
+        unsubBroadcastRef.current = null;
+      }
       editorRef.current = null;
     };
+  }, []);
+
+  // ── ResizeObserver: notifica a Apollon cuando el contenedor cambia de tamaño ──
+  // Necesario cuando se abre/cierra el inspector o panel IA
+  // DEBE ir antes del early return para cumplir Reglas de React (hooks antes de condicionales)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const ro = new ResizeObserver(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      // Apollon puede exponer un método resize() o similar
+      if (typeof (editor as any).resize === 'function') {
+        (editor as any).resize();
+      }
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
   }, []);
 
   // ── defaultModel memoizado para no recrear el objeto en cada render ──
   const defaultModel = useMemo(
     () => (initialModel ? toApollon(initialModel) : undefined),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [initialModel?.id, initialModel?.version],  // NO toda la referencia
+    [initialModel?.id, initialModel?.version],
   );
 
   if (!initialModel) {
@@ -158,7 +211,7 @@ export function ApollonCanvas({
   }
 
   return (
-    <div className="absolute inset-0">
+    <div ref={containerRef} className="absolute inset-0">
       <Apollon
         style={{ width: '100%', height: '100%' }}
         defaultModel={defaultModel}
