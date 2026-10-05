@@ -8,6 +8,7 @@ import { useEditorStore } from '../../stores/editor.store';
 // Debe ser mayor que el tiempo máximo de procesamiento de un update Yjs en Apollon.
 const REMOTE_APPLY_LOCK_MS = 2000;
 console.log('🔵 ApollonCanvas RENDER', new Error().stack);
+console.log('🔵 ApollonCanvas RENDER', new Error().stack);
 useEffect(() => {
   console.log('🟢 ApollonCanvas MOUNT', Date.now());
   return () => console.log('🔴 ApollonCanvas UNMOUNT', Date.now());
@@ -204,7 +205,7 @@ export function ApollonCanvas({
   // ── defaultModel memoizado para no recrear el objeto en cada render ──
   const defaultModel = useMemo(
     () => (initialModel ? toApollon(initialModel) : undefined),
-    [initialModel?.id, initialModel?.version],
+    [initialModel?.id],
   );
 
   if (!initialModel) {
