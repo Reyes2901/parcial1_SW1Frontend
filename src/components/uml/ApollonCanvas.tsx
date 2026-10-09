@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react';
+import { memo, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Apollon, ApollonEditor, UMLDiagramType } from '@tumaet/apollon';
 import { toApollon, fromApollon } from '../../adapters/apollon-adapter';
 import type { UMLModel } from '../../domain/uml-model';
@@ -16,7 +16,7 @@ interface ApollonCanvasProps {
   collaborationEnabled?: boolean;
 }
 
-export function ApollonCanvas({
+function ApollonCanvasInner({
   initialModel,
   onModelChange,
   onEditorReady,
@@ -46,7 +46,7 @@ export function ApollonCanvas({
     if (editorRef.current) editorRef.current.setReadonly(readOnly);
   }, [readOnly]);
 
-  // Aplicar mensajes remotos: SIN guard, Apollon ya filtra internamente
+  // Aplicar mensajes remotos
   useEffect(() => {
     if (!incomingMessage?.data || !editorRef.current) return;
 
@@ -84,14 +84,11 @@ export function ApollonCanvas({
     editorRef.current = editor;
     onEditorReadyRef.current?.(editor);
 
-    // SIN guard: Apollon ya distingue updates locales vs remotos por origin.
-    // El guard anterior bloqueaba envíos legítimos.
     const unsubBroadcast = editor.sendBroadcastMessage((base64Data: string) => {
       onOutgoingMessageRef.current?.(base64Data);
     });
     unsubBroadcastRef.current = typeof unsubBroadcast === 'function' ? unsubBroadcast : null;
 
-    // SIN guard: Apollon solo emite para cambios locales (origin === "store")
     subModelRef.current = editor.subscribeToModelChange((apollonModel) => {
       try {
         const mcu = fromApollon(apollonModel);
@@ -135,7 +132,11 @@ export function ApollonCanvas({
   }
 
   return (
-    <div ref={containerRef} className="absolute inset-0">
+    <div
+      ref={containerRef}
+      className="absolute inset-0"
+      style={{ minHeight: 0, minWidth: 0 }}
+    >
       <Apollon
         style={CANVAS_STYLE}
         defaultModel={defaultModel}
@@ -146,3 +147,15 @@ export function ApollonCanvas({
     </div>
   );
 }
+
+// Comparación custom: solo re-renderiza si las props "reales" cambian.
+export const ApollonCanvas = memo(ApollonCanvasInner, (prev, next) => {
+  return (
+    prev.initialModel?.id === next.initialModel?.id &&
+    prev.readOnly === next.readOnly &&
+    prev.collaborationEnabled === next.collaborationEnabled &&
+    prev.incomingMessage?.id === next.incomingMessage?.id &&
+    prev.onModelChange === next.onModelChange &&
+    prev.onOutgoingMessage === next.onOutgoingMessage
+  );
+});

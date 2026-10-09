@@ -27,11 +27,15 @@ export function useSaveDiagram(id: string) {
       // Actualiza la caché SIN invalidar (invalidar dispara refetch → loop)
       qc.setQueryData(queryKeys.diagram(id), data);
     },
-    onError: (err: unknown) => {
+    onError: (err, _variables) => {
       const appErr = err as { status?: number; code?: string };
       if (appErr.status === 409) {
-        toast.error('Conflicto de versión. Recarga la página para sincronizar.');
-      } else if (appErr.status === 400 && appErr.code === 'VALIDATION_ERROR') {
+        // Sincroniza: fuerza refetch para que EditorPage actualice versionRef
+        void qc.invalidateQueries({ queryKey: queryKeys.diagram(id) });
+        toast.error('Conflicto de versión. Sincronizando…');
+        return;
+      }
+      if (appErr.status === 400 && appErr.code === 'VALIDATION_ERROR') {
         toast.error('Modelo inválido. Revisa las relaciones N:M con atributos.');
       }
     },

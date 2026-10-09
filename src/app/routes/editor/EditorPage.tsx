@@ -70,7 +70,6 @@ export default function EditorPage() {
       versionRef.current = diagramQuery.data.version;
     }
   }, [diagramQuery.data?.version]);
-
   // Ref que mantiene el modelo más reciente para el save de despedida
   const currentModelRef = useRef<UMLModel | null>(null);
   useEffect(() => {
