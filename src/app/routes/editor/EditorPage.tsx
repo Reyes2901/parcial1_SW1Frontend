@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import {
   ChevronLeft, Bot, Upload, Code, CheckCircle, Loader, AlertCircle, Send, Users, RefreshCw,
 } from 'lucide-react';
+import type { ApollonEditor } from '@besser/wme';
+import type { Operation } from 'fast-json-patch';
 import { useDiagram, useSaveDiagram } from '../../../hooks/useDiagram';
 import { useDebouncedSave } from '../../../hooks/useDebouncedSave';
 import { useLock } from '../../../hooks/useLock';
@@ -23,12 +25,23 @@ import type { UMLModel } from '../../../domain/uml-model';
 import type { UMLCommand } from '../../../domain/uml-command';
 import { cn } from '../../../lib/cn';
 
+type Patch = Operation[];
+
 const SAVE_STATUS_ICON = {
   idle: null,
   saving: <Loader className="h-3.5 w-3.5 animate-spin text-[var(--color-foreground-muted)]" />,
   saved: <CheckCircle className="h-3.5 w-3.5 text-[var(--color-success)]" />,
   error: <AlertCircle className="h-3.5 w-3.5 text-[var(--color-danger)]" />,
 };
+
+const COLLAB_SAVE_INTERVAL_MS = 15_000;
+const THROTTLE_MS = 30;
+const ECHO_WINDOW_MS = 300;
+const DEDUPE_WINDOW_MS = 100;
+
+function patchSignature(patch: Patch): string {
+  return patch.map((op) => `${op.op}:${(op as { path?: string }).path ?? ''}`).join('|');
+}
 
 export default function EditorPage() {
   const { diagramId } = useParams<{ diagramId: string }>();
@@ -40,47 +53,198 @@ export default function EditorPage() {
   const [currentModel, setCurrentModel] = useState<UMLModel | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [latestGenId, setLatestGenId] = useState<string | null>(null);
-  const [incomingMessage, setIncomingMessage] = useState<{ data: string; id: number } | null>(null);
-  const incomingIdRef = useRef(0);
+
+  const editorRef = useRef<ApollonEditor | null>(null);
+  const pendingQueueRef = useRef<string[]>([]);
+  const clientIdRef = useRef<string>(crypto.randomUUID());
+
+  const applyingRemotePatchRef = useRef(false);
+  const echoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAppliedSignatureRef = useRef<string>('');
+  const lastAppliedTimeRef = useRef<number>(0);
+
+  const pendingPatchRef = useRef<Patch | null>(null);
+  const lastSendTimeRef = useRef(0);
+  const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const lastSentSignatureRef = useRef<string>('');
+  const lastSentTimeRef = useRef<number>(0);
+
+  const pendingApplyRef = useRef<Patch[]>([]);
+  const rafScheduledRef = useRef(false);
+
+  const flushPendingApplies = useCallback(() => {
+    rafScheduledRef.current = false;
+    const editor = editorRef.current;
+    const patches = pendingApplyRef.current;
+    pendingApplyRef.current = [];
+    if (!editor || patches.length === 0) return;
+
+    applyingRemotePatchRef.current = true;
+    if (echoTimerRef.current) clearTimeout(echoTimerRef.current);
+
+    try {
+      for (const p of patches) {
+        editor.importPatch(p);
+      }
+    } catch (e) {
+      console.warn('[patch-apply-error]', e);
+    } finally {
+      echoTimerRef.current = setTimeout(() => {
+        applyingRemotePatchRef.current = false;
+      }, ECHO_WINDOW_MS);
+    }
+  }, []);
+
+  const applyToEditor = useCallback((editor: ApollonEditor, raw: string) => {
+    try {
+      const parsed = JSON.parse(raw) as { kind?: string; patch?: Patch };
+      if (parsed.kind === 'patch' && parsed.patch) {
+        lastAppliedSignatureRef.current = patchSignature(parsed.patch);
+        lastAppliedTimeRef.current = Date.now();
+
+        pendingApplyRef.current.push(parsed.patch);
+        if (!rafScheduledRef.current) {
+          rafScheduledRef.current = true;
+          requestAnimationFrame(flushPendingApplies);
+        }
+      }
+    } catch (e) {
+      console.warn('[patch-parse-error]', e);
+    }
+  }, [flushPendingApplies]);
+
+  const handleEditorReady = useCallback((editor: ApollonEditor | null) => {
+    editorRef.current = editor;
+    if (!editor) return;
+    const pending = pendingQueueRef.current;
+    pendingQueueRef.current = [];
+    for (const raw of pending) {
+      applyToEditor(editor, raw);
+    }
+  }, [applyToEditor]);
+
+  const flushPatch = useCallback(() => {
+    throttleTimerRef.current = null;
+    const patch = pendingPatchRef.current;
+    pendingPatchRef.current = null;
+    if (!patch || patch.length === 0) return;
+    if (collabStateRef.current !== 'connected') return;
+
+    const payload = JSON.stringify({
+      kind: 'patch',
+      patch,
+      senderId: clientIdRef.current,
+      ts: Date.now(),
+    });
+    lastSendTimeRef.current = Date.now();
+    collaborationRef.current.send(payload);
+  }, []);
+
+  const handleLocalPatch = useCallback((patch: Patch) => {
+    if (applyingRemotePatchRef.current) {
+      return;
+    }
+
+    const sig = patchSignature(patch);
+    const now = Date.now();
+    if (
+      sig === lastAppliedSignatureRef.current &&
+      now - lastAppliedTimeRef.current < ECHO_WINDOW_MS + 200
+    ) {
+      return;
+    }
+
+    if (
+      sig === lastSentSignatureRef.current &&
+      now - lastSentTimeRef.current < DEDUPE_WINDOW_MS
+    ) {
+      return;
+    }
+    lastSentSignatureRef.current = sig;
+    lastSentTimeRef.current = now;
+
+    if (pendingPatchRef.current) {
+      pendingPatchRef.current = [...pendingPatchRef.current, ...patch];
+    } else {
+      pendingPatchRef.current = patch;
+    }
+
+    const elapsed = now - lastSendTimeRef.current;
+    if (elapsed >= THROTTLE_MS) {
+      flushPatch();
+    } else if (!throttleTimerRef.current) {
+      throttleTimerRef.current = setTimeout(flushPatch, THROTTLE_MS - elapsed);
+    }
+  }, [flushPatch]);
+
+  const handleCollabMessage = useCallback((data: string) => {
+    let parsed: { kind?: string; senderId?: string; patch?: Patch } | null = null;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (!parsed) return;
+
+    if (parsed.kind === 'patch') {
+      if (parsed.senderId === clientIdRef.current) return;
+      const editor = editorRef.current;
+      if (!editor) {
+        pendingQueueRef.current.push(data);
+        return;
+      }
+      applyToEditor(editor, data);
+    }
+  }, [applyToEditor]);
 
   const collaboration = useCollaboration({
     diagramId: diagramId!,
     token,
-    onMessage: (data) => {
-      incomingIdRef.current += 1;
-      setIncomingMessage({ data, id: incomingIdRef.current });
-    },
+    onMessage: handleCollabMessage,
   });
 
-  // Locks solo si NO hay colaboración activa
+  const collaborationRef = useRef(collaboration);
+  collaborationRef.current = collaboration;
+  const collabStateRef = useRef(collaboration.state);
+  collabStateRef.current = collaboration.state;
+
+  useEffect(() => {
+    return () => {
+      if (echoTimerRef.current) clearTimeout(echoTimerRef.current);
+      if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
+    };
+  }, []);
+
   useLock(diagramId!, { enabled: collaboration.state !== 'connected' });
 
-  // Ref que mantiene la versión actual del DIAGRAMA
   const versionRef = useRef<number>(1);
-
-  // Ref para collaboration.state — evita recrear saveFn en cada cambio de WS
-  const collabStateRef = useRef(collaboration.state);
-  useEffect(() => {
-    collabStateRef.current = collaboration.state;
-  }, [collaboration.state]);
-
-  // Sincroniza con la versión del servidor cuando carga el diagrama
   useEffect(() => {
     if (diagramQuery.data?.version != null) {
       versionRef.current = diagramQuery.data.version;
     }
   }, [diagramQuery.data?.version]);
-  // Ref que mantiene el modelo más reciente para el save de despedida
+
   const currentModelRef = useRef<UMLModel | null>(null);
   useEffect(() => {
     currentModelRef.current = currentModel;
   }, [currentModel]);
 
-  // Guardar el estado al cerrar la pestaña / desmontar
+  const lastSavedJsonRef = useRef<string>('');
+  const hasInitializedLastSavedRef = useRef(false);
+  useEffect(() => {
+    if (!hasInitializedLastSavedRef.current && diagramQuery.data?.umlModel) {
+      lastSavedJsonRef.current = JSON.stringify(diagramQuery.data.umlModel);
+      hasInitializedLastSavedRef.current = true;
+    }
+  }, [diagramQuery.data?.umlModel]);
+
   useEffect(() => {
     const persist = () => {
       const m = currentModelRef.current;
       if (!m) return;
+      const json = JSON.stringify(m);
+      if (lastSavedJsonRef.current === json) return;
       try {
         const token = useAuthStore.getState().token;
         const apiBase = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
@@ -93,9 +257,8 @@ export default function EditorPage() {
           body: JSON.stringify({ umlModel: m }),
           keepalive: true,
         });
-      } catch {
-        /* ignore */
-      }
+        lastSavedJsonRef.current = json;
+      } catch { /* ignore */ }
     };
 
     window.addEventListener('beforeunload', persist);
@@ -105,21 +268,37 @@ export default function EditorPage() {
     };
   }, [diagramId]);
 
+  const saveMutationRef = useRef(saveMutation);
+  useEffect(() => {
+    saveMutationRef.current = saveMutation;
+  }, [saveMutation]);
+
+  useEffect(() => {
+    if (collaboration.state !== 'connected') return;
+    const interval = setInterval(() => {
+      const m = currentModelRef.current;
+      if (!m) return;
+      const json = JSON.stringify(m);
+      if (lastSavedJsonRef.current === json) return;
+      saveMutationRef.current
+        .mutateAsync({ umlModel: m, version: undefined })
+        .then((res) => {
+          lastSavedJsonRef.current = json;
+          versionRef.current = res.version;
+        })
+        .catch(() => { /* silencioso */ });
+    }, COLLAB_SAVE_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [collaboration.state]);
+
   const saveFn = useCallback(async (umlModel: UMLModel) => {
     const isCollab = collabStateRef.current === 'connected';
-    // En colab: no enviamos version (evita 409 por carreras entre clientes).
-    // En solo: enviamos version para detectar conflictos.
     const expectedVersion = isCollab ? undefined : versionRef.current;
-    console.log('[ver] before PUT', { isCollab, expectedVersion });
     try {
-      const res = await saveMutation.mutateAsync({
-        umlModel,
-        version: expectedVersion,
-      });
-      console.log('[ver] after PUT 200', { newVersion: res.version });
+      const res = await saveMutation.mutateAsync({ umlModel, version: expectedVersion });
       versionRef.current = res.version;
+      lastSavedJsonRef.current = JSON.stringify(umlModel);
     } catch (err) {
-      console.log('[ver] after 409', { localVersion: versionRef.current });
       throw err;
     }
   }, [saveMutation]);
@@ -133,7 +312,9 @@ export default function EditorPage() {
     if (json === lastModelJsonRef.current) return;
     lastModelJsonRef.current = json;
     setCurrentModel(newModel);
-    scheduleSave(newModel);
+    if (collabStateRef.current !== 'connected') {
+      scheduleSave(newModel);
+    }
   }, [scheduleSave]);
 
   const diagram = diagramQuery.data;
@@ -214,7 +395,6 @@ export default function EditorPage() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      {/* Topbar */}
       <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[var(--color-primary)] px-4">
         <Link
           to={`/projects/${diagram.projectId}`}
@@ -227,7 +407,6 @@ export default function EditorPage() {
         <span className="text-sm font-medium text-white">{diagram.name}</span>
         <div className="flex-1" />
 
-        {/* Connection status badge */}
         <div className="flex items-center gap-1.5 rounded-[var(--radius-control)] bg-white/10 px-2.5 py-1 text-xs font-medium text-white/80">
           {collaboration.state === 'connected' && (
             <>
@@ -301,15 +480,14 @@ export default function EditorPage() {
         </button>
       </div>
 
-      {/* Fila central */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-w-0 flex-1 overflow-hidden bg-[var(--color-background)]">
           <ApollonCanvas
             key={diagramId}
             initialModel={model}
             onModelChange={handleModelChange}
-            incomingMessage={incomingMessage}
-            onOutgoingMessage={collaboration.send}
+            onLocalPatch={handleLocalPatch}
+            onEditorReady={handleEditorReady}
             collaborationEnabled={collaboration.state === 'connected'}
           />
         </div>
@@ -339,7 +517,6 @@ export default function EditorPage() {
         )}
       </div>
 
-      {/* Statusbar */}
       <div className="flex h-8 shrink-0 items-center gap-4 border-t border-[var(--color-border)] bg-[var(--color-secondary)] px-4">
         <span className="font-mono text-xs text-[var(--color-foreground-faint)]">
           v{diagram.version}

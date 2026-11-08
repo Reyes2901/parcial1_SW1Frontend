@@ -12,16 +12,20 @@ export function useCollaboration({ diagramId, token, onMessage }: CollaborationO
   const wsRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<ConnectionState>('connecting');
   const [peerCount, setPeerCount] = useState(0);
+  const [initialPeerCount, setInitialPeerCount] = useState<number | null>(null);
   const onMessageRef = useRef(onMessage);
 
-  // Refs para diagramId y token: evita que connect() se re-cree cuando
-  // estos valores cambian referencia sin cambiar semánticamente.
   const diagramIdRef = useRef(diagramId);
   const tokenRef = useRef(token);
 
   useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
   useEffect(() => { diagramIdRef.current = diagramId; }, [diagramId]);
   useEffect(() => { tokenRef.current = token; }, [token]);
+
+  // Reset del initialPeerCount SOLO al cambiar diagrama. Nunca al reconectar.
+  useEffect(() => {
+    setInitialPeerCount(null);
+  }, [diagramId]);
 
   const connect = useCallback(() => {
     const currentToken = tokenRef.current;
@@ -32,9 +36,8 @@ export function useCollaboration({ diagramId, token, onMessage }: CollaborationO
       return;
     }
 
-    // Cerrar conexión anterior si existía
     if (wsRef.current) {
-      wsRef.current.onclose = null; // Evitar setState('disconnected') al cerrar manualmente
+      wsRef.current.onclose = null;
       wsRef.current.close();
       wsRef.current = null;
     }
@@ -45,25 +48,36 @@ export function useCollaboration({ diagramId, token, onMessage }: CollaborationO
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => setState('connected');
+    ws.onopen = () => {
+      console.log('[ws-open]');
+      setState('connected');
+    };
     ws.onmessage = (e) => {
+      console.log(`[ws-recv] len=${e.data.length} first40=${String(e.data).slice(0, 40)}`);
       try {
         const parsed = JSON.parse(e.data);
         if (parsed.type === 'joined') {
-          setPeerCount(parsed.peers);
+          const peers = parsed.peers as number;
+          setPeerCount(peers);
+          // Capturar SOLO el primer joined de esta conexión inicial.
+          setInitialPeerCount((prev) => (prev === null ? peers : prev));
           return;
         }
-        // Mensajes de control JSON pasan al handler normal
-      } catch { /* no es JSON, es Yjs base64 */ }
+      } catch { /* no es JSON */ }
       onMessageRef.current(e.data);
     };
-    ws.onclose = () => setState('disconnected');
-    ws.onerror = () => setState('error');
-  // connect es estable: no tiene deps del valor actual (usa refs)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    ws.onclose = (e) => {
+      console.log(`[ws-close] code=${e.code}`);
+      setState('disconnected');
+      // NO resetear initialPeerCount aquí.
+    };
+    ws.onerror = () => {
+      setState('error');
+      // NO resetear initialPeerCount aquí.
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Conectar al montar. Reconectar solo si cambia diagramId o token (valores reales).
   const prevDiagramIdRef = useRef<string | null>(null);
   const prevTokenRef = useRef<string | null>(null);
 
@@ -71,21 +85,11 @@ export function useCollaboration({ diagramId, token, onMessage }: CollaborationO
     const didChange =
       prevDiagramIdRef.current !== diagramId ||
       prevTokenRef.current !== token;
-
     prevDiagramIdRef.current = diagramId;
     prevTokenRef.current = token;
-
-    if (didChange) {
-      connect();
-    }
-
-    return () => {
-      // No cerrar en cleanup de deps: connect() ya lo hace.
-      // Cerrar solo al desmontar completamente (el useEffect de abajo lo hace).
-    };
+    if (didChange) connect();
   }, [diagramId, token, connect]);
 
-  // Cleanup al desmontar
   useEffect(() => {
     return () => {
       if (wsRef.current) {
@@ -98,17 +102,15 @@ export function useCollaboration({ diagramId, token, onMessage }: CollaborationO
 
   const send = useCallback((data: string) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-
-    // Si es JSON de control (handshake, etc.), enviarlo tal cual
+    console.log(`[ws-send] len=${data.length} first40=${data.slice(0, 40)}`);
     try {
       JSON.parse(data);
       wsRef.current.send(data);
       return;
     } catch {
-      // No es JSON → es Yjs base64 → envolver en el envelope del servidor
       wsRef.current.send(JSON.stringify({ diagramData: data }));
     }
   }, []);
 
-  return { state, peerCount, send, reconnect: connect };
+  return { state, peerCount, initialPeerCount, send, reconnect: connect };
 }

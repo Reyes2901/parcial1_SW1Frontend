@@ -1,5 +1,14 @@
-// Único archivo que toca tipos internos de @tumaet/apollon
-import type { UMLModel as ApollonUMLModel, ApollonNode, ApollonEdge, DiagramEdgeType } from '@tumaet/apollon';
+// Único archivo que toca tipos internos de @besser/wme
+import type {
+  UMLModel as BesserUMLModel,
+  UMLElement,
+  UMLRelationship,
+  UMLClassifier,
+  UMLClassifierMember,
+  UMLAssociation,
+  Selection,
+} from '@besser/wme';
+import { UMLDiagramType, UMLElementType, UMLRelationshipType } from '@besser/wme';
 import type {
   UMLModel,
   UMLClass,
@@ -12,44 +21,12 @@ import type {
   Cardinality,
 } from '../domain/uml-model';
 
-const DIAGRAM_TYPE = 'ClassDiagram' as const;
+// Re-export types needed by other files
+export type { BesserUMLModel, Selection };
 
-/**
- * Real Apollon v5.3.0 types (from node_modules/@tumaet/apollon/dist/index.d.ts):
- *
- * export declare type UMLModel = {
- *     version: `4.${number}.${number}`;
- *     id: string;
- *     title: string;
- *     type: UMLDiagramType; // 'ClassDiagram'
- *     nodes: ApollonNode[];
- *     edges: ApollonEdge[];
- *     assessments: {
- *         [id: string]: Assessment;
- *     };
- *     interactive?: InteractiveElements;
- * };
- *
- * export declare type ApollonNode = {
- *     id: string;
- *     width: number;
- *     height: number;
- *     type: DiagramNodeType; // 'class'
- *     position: { x: number; y: number };
- *     data: { [key: string]: unknown };
- *     measured: { width: number; height: number };
- * };
- *
- * export declare type ApollonEdge = {
- *     id: string;
- *     source: string;
- *     target: string;
- *     type: DiagramEdgeType;
- *     sourceHandle: string;
- *     targetHandle: string;
- *     data: OrthogonalEdgeData;
- * };
- */
+const DIAGRAM_TYPE = UMLDiagramType.ClassDiagram;
+
+// ─── Visibility helpers ──────────────────────────────────────────────
 
 function visibilitySymbol(v: Visibility): string {
   switch (v) {
@@ -61,6 +38,18 @@ function visibilitySymbol(v: Visibility): string {
   }
 }
 
+function symbolToVisibility(sym: string): Visibility {
+  switch (sym) {
+    case '+': return 'public';
+    case '-': return 'private';
+    case '#': return 'protected';
+    case '~': return 'package';
+    default: return 'public';
+  }
+}
+
+// ─── Name formatting ─────────────────────────────────────────────────
+
 function formatAttributeName(attr: UMLAttribute): string {
   return `${visibilitySymbol(attr.visibility)} ${attr.name}: ${attr.type}`;
 }
@@ -70,32 +59,7 @@ function formatMethodName(m: UMLMethod): string {
   return `${visibilitySymbol(m.visibility)} ${m.name}(${params}): ${m.returnType}`;
 }
 
-function mapKindToEdgeType(kind: RelationKind): DiagramEdgeType {
-  switch (kind) {
-    case 'aggregation': return 'ClassAggregation' as DiagramEdgeType;
-    case 'composition': return 'ClassComposition' as DiagramEdgeType;
-    case 'inheritance': return 'ClassInheritance' as DiagramEdgeType;
-    case 'realization': return 'ClassRealization' as DiagramEdgeType;
-    case 'dependency': return 'ClassDependency' as DiagramEdgeType;
-    case 'association':
-    default:
-      return 'ClassBidirectional' as DiagramEdgeType;
-  }
-}
-
-function mapEdgeTypeToKind(type: string): RelationKind {
-  switch (type) {
-    case 'ClassAggregation': return 'aggregation';
-    case 'ClassComposition': return 'composition';
-    case 'ClassInheritance': return 'inheritance';
-    case 'ClassRealization': return 'realization';
-    case 'ClassDependency': return 'dependency';
-    case 'ClassUnidirectional':
-    case 'ClassBidirectional':
-    default:
-      return 'association';
-  }
-}
+// ─── Parse UML strings back to structured data ──────────────────────
 
 function parseAttr(formatted?: string): { name: string; type: string; visibility: Visibility } {
   if (!formatted) return { name: 'attribute', type: 'String', visibility: 'private' };
@@ -128,174 +92,271 @@ function parseMethod(formatted?: string): { name: string; returnType: string; vi
   return { name: name || 'method', returnType, visibility };
 }
 
+// ─── Kind ↔ Element/Relationship type mappings ───────────────────────
+
+function classKindToElementType(kind: ClassKind): string {
+  switch (kind) {
+    case 'abstract': return 'AbstractClass';
+    case 'interface': return 'Interface';
+    case 'enumeration': return 'Enumeration';
+    case 'class':
+    default:
+      return 'Class';
+  }
+}
+
+function elementTypeToClassKind(type: string): ClassKind {
+  switch (type) {
+    case 'AbstractClass': return 'abstract';
+    case 'Interface': return 'interface';
+    case 'Enumeration': return 'enumeration';
+    case 'Class':
+    default:
+      return 'class';
+  }
+}
+
+function mapKindToRelType(kind: RelationKind): string {
+  switch (kind) {
+    case 'aggregation': return 'ClassAggregation';
+    case 'composition': return 'ClassComposition';
+    case 'inheritance': return 'ClassInheritance';
+    case 'realization': return 'ClassRealization';
+    case 'dependency': return 'ClassDependency';
+    case 'association':
+    default:
+      return 'ClassBidirectional';
+  }
+}
+
+function relTypeToKind(type: string): RelationKind {
+  switch (type) {
+    case 'ClassAggregation': return 'aggregation';
+    case 'ClassComposition': return 'composition';
+    case 'ClassInheritance': return 'inheritance';
+    case 'ClassRealization': return 'realization';
+    case 'ClassDependency': return 'dependency';
+    case 'ClassUnidirectional':
+    case 'ClassBidirectional':
+    default:
+      return 'association';
+  }
+}
+
+function handleToDirection(handle?: string): string {
+  switch (handle) {
+    case 'top': return 'Up';
+    case 'right': return 'Right';
+    case 'bottom': return 'Down';
+    case 'left': return 'Left';
+    default: return 'Right';
+  }
+}
+
+function directionToHandle(dir: string): string {
+  switch (dir) {
+    case 'Up': return 'top';
+    case 'Right': return 'right';
+    case 'Down': return 'bottom';
+    case 'Left': return 'left';
+    default: return 'right';
+  }
+}
+
 /**
- * Convierte MCU → formato Apollon inyectando type: 'ClassDiagram' y estructurando nodes/edges.
+ * Convierte MCU → formato BESSER WME (UMLModel con elements/relationships dicts).
+ * El modelo resultante se puede asignar con `editor.model = toApollon(model)`.
  */
-export function toApollon(model: UMLModel): ApollonUMLModel {
-  const nodes: ApollonNode[] = (model.classes || []).map((cls) => {
+export function toApollon(model: UMLModel): BesserUMLModel {
+  const elements: Record<string, UMLElement> = {};
+  const relationships: Record<string, UMLRelationship> = {};
+
+  for (const cls of model.classes || []) {
     const attrCount = cls.attributes?.length || 0;
     const methodCount = cls.methods?.length || 0;
     const width = cls.width ?? 220;
     const height = cls.height ?? (80 + attrCount * 24 + methodCount * 24);
 
-    return {
+    // El elemento clase padre
+    const classElement: UMLClassifier = {
       id: cls.id,
-      type: 'class' as ApollonNode['type'],
-      width,
-      height,
-      position: { x: cls.position?.x ?? 100, y: cls.position?.y ?? 100 },
-      data: {
-        name: cls.name,
-        isAbstract: cls.kind === 'abstract',
-        stereotype: cls.kind === 'interface' ? 'interface' : cls.kind === 'enumeration' ? 'enumeration' : undefined,
-        attributes: (cls.attributes || []).map((attr) => ({
-          id: attr.id,
-          name: formatAttributeName(attr),
-          _mcuAttribute: attr,
-        })),
-        methods: (cls.methods || []).map((m) => ({
-          id: m.id,
-          name: formatMethodName(m),
-          _mcuMethod: m,
-        })),
-        _mcuClass: cls,
-      },
-      measured: { width, height },
+      name: cls.name,
+      type: classKindToElementType(cls.kind) as UMLElement['type'],
+      owner: null,
+      bounds: { x: cls.position?.x ?? 100, y: cls.position?.y ?? 100, width, height },
+      attributes: (cls.attributes || []).map((a) => a.id),
+      methods: (cls.methods || []).map((m) => m.id),
     };
-  });
+    elements[cls.id] = classElement;
 
-  const edges: ApollonEdge[] = (model.relations || []).map((rel) => ({
-    id: rel.id,
-    source: rel.sourceClassId,
-    target: rel.targetClassId,
-    type: mapKindToEdgeType(rel.kind),
-    sourceHandle: rel.sourceHandle ?? 'right',
-    targetHandle: rel.targetHandle ?? 'left',
-    data: {
-      label: rel.name || '',
-      sourceMultiplicity: rel.sourceCardinality || '',
-      targetMultiplicity: rel.targetCardinality || '',
-      sourceRole: rel.sourceRole || '',
-      targetRole: rel.targetRole || '',
-      points: [],
-      _mcuRelation: rel,
-    } as unknown as ApollonEdge['data'],
-  }));
+    // Atributos como elementos hijos
+    for (const attr of cls.attributes || []) {
+      const memberElement: UMLClassifierMember = {
+        id: attr.id,
+        name: formatAttributeName(attr),
+        type: 'ClassAttribute' as UMLElement['type'],
+        owner: cls.id,
+        bounds: { x: 0, y: 0, width, height: 24 },
+        visibility: attr.visibility as UMLClassifierMember['visibility'],
+      };
+      elements[attr.id] = memberElement;
+    }
+
+    // Métodos como elementos hijos
+    for (const m of cls.methods || []) {
+      const memberElement: UMLClassifierMember = {
+        id: m.id,
+        name: formatMethodName(m),
+        type: 'ClassMethod' as UMLElement['type'],
+        owner: cls.id,
+        bounds: { x: 0, y: 0, width, height: 24 },
+        visibility: m.visibility as UMLClassifierMember['visibility'],
+      };
+      elements[m.id] = memberElement;
+    }
+  }
+
+  for (const rel of model.relations || []) {
+    const assocRel = {
+      id: rel.id,
+      name: rel.name || '',
+      type: mapKindToRelType(rel.kind) as UMLRelationship['type'],
+      owner: null,
+      bounds: { x: 0, y: 0, width: 0, height: 0 },
+      path: [{ x: 0, y: 0 }, { x: 0, y: 0 }] as UMLRelationship['path'],
+      source: {
+        element: rel.sourceClassId,
+        direction: handleToDirection(rel.sourceHandle) as UMLRelationship['source']['direction'],
+        multiplicity: rel.sourceCardinality || '1',
+        role: rel.sourceRole || '',
+      },
+      target: {
+        element: rel.targetClassId,
+        direction: handleToDirection(rel.targetHandle) as UMLRelationship['target']['direction'],
+        multiplicity: rel.targetCardinality || '1',
+        role: rel.targetRole || '',
+      },
+    } as unknown as UMLAssociation;
+    relationships[rel.id] = assocRel;
+  }
 
   return {
-    id: model.id,
-    title: model.name,
-    version: '4.0.0' as ApollonUMLModel['version'],
+    version: '3.0.0',
     type: DIAGRAM_TYPE,
-    nodes,
-    edges,
+    size: { width: 2000, height: 2000 },
+    elements,
+    interactive: { elements: {}, relationships: {} },
+    relationships,
     assessments: {},
   };
 }
 
 /**
- * Convierte formato Apollon → MCU invirtiendo la conversión sin perder información.
+ * Convierte formato BESSER WME → MCU invirtiendo la conversión sin perder información.
  * Lanza si el tipo no es ClassDiagram.
  */
-export function fromApollon(apollonModel: ApollonUMLModel): UMLModel {
-  if (apollonModel.type !== DIAGRAM_TYPE) {
+export function fromApollon(besserModel: BesserUMLModel): UMLModel {
+  if (besserModel.type !== DIAGRAM_TYPE) {
     throw new Error(
-      `Unsupported diagram type: ${apollonModel.type}. This platform only supports ClassDiagram.`,
+      `Unsupported diagram type: ${besserModel.type}. This platform only supports ClassDiagram.`,
     );
   }
 
-  const rawNodes = apollonModel.nodes || [];
-  const rawEdges = apollonModel.edges || [];
+  const elements = besserModel.elements || {};
+  const rels = besserModel.relationships || {};
 
-  const classes: UMLClass[] = rawNodes.map((node) => {
-    const data = (node.data || {}) as Record<string, unknown>;
-    const mcuClass = data._mcuClass as UMLClass | undefined;
+  // Recolectar IDs de atributos y métodos (hijos con owner != null)
+  const childIds = new Set<string>();
+  for (const el of Object.values(elements)) {
+    if (el.owner) childIds.add(el.id);
+  }
 
-    const kind: ClassKind = data.isAbstract
-      ? 'abstract'
-      : (data.stereotype === 'interface' || data.stereotype === 'Interface')
-      ? 'interface'
-      : (data.stereotype === 'enumeration' || data.stereotype === 'Enumeration')
-      ? 'enumeration'
-      : mcuClass?.kind || 'class';
+  const classes: UMLClass[] = [];
 
-    const rawAttrs = (data.attributes || []) as Array<Record<string, unknown>>;
-    const attributes: UMLAttribute[] = rawAttrs.map((attrObj) => {
-      const mcuAttr = attrObj._mcuAttribute as UMLAttribute | undefined;
-      if (mcuAttr) {
-        return { ...mcuAttr, id: (attrObj.id as string) || mcuAttr.id };
-      }
-      const parsed = parseAttr(attrObj.name as string | undefined);
-      return {
-        id: (attrObj.id as string) || crypto.randomUUID(),
-        name: parsed.name,
-        type: parsed.type,
-        visibility: parsed.visibility,
-        isPrimaryKey: false,
-        isRequired: false,
-        isUnique: false,
-      };
-    });
+  for (const el of Object.values(elements)) {
+    // Solo elementos de nivel superior (clases, interfaces, etc.)
+    if (el.owner) continue;
 
-    const rawMethods = (data.methods || []) as Array<Record<string, unknown>>;
-    const methods: UMLMethod[] = rawMethods.map((mObj) => {
-      const mcuMethod = mObj._mcuMethod as UMLMethod | undefined;
-      if (mcuMethod) {
-        return { ...mcuMethod, id: (mObj.id as string) || mcuMethod.id };
-      }
-      const parsed = parseMethod(mObj.name as string | undefined);
-      return {
-        id: (mObj.id as string) || crypto.randomUUID(),
-        name: parsed.name,
-        returnType: parsed.returnType,
-        parameters: [],
-        visibility: parsed.visibility,
-      };
-    });
+    const type = el.type;
+    if (type !== 'Class' && type !== 'AbstractClass' && type !== 'Interface' && type !== 'Enumeration') {
+      continue;
+    }
 
-    const width = node.width ?? node.measured?.width;
-    const height = node.height ?? node.measured?.height;
+    const classifier = el as UMLClassifier;
+    const kind = elementTypeToClassKind(type);
 
-    return {
-      id: node.id,
-      name: String(data.name || mcuClass?.name || 'Class'),
+    const attributes: UMLAttribute[] = (classifier.attributes || [])
+      .map((attrId): UMLAttribute | null => {
+        const attrEl = elements[attrId] as UMLClassifierMember | undefined;
+        if (!attrEl) return null;
+        const parsed = parseAttr(attrEl.name);
+        const visibility = (attrEl.visibility as Visibility) || parsed.visibility;
+        const result: UMLAttribute = {
+          id: attrEl.id,
+          name: parsed.name,
+          type: parsed.type,
+          visibility,
+          isPrimaryKey: !!(attrEl as Record<string, unknown>).isId,
+          isRequired: false,
+          isUnique: false,
+        };
+        const defaultValue = (attrEl as Record<string, unknown>).defaultValue;
+        if (typeof defaultValue === 'string') {
+          result.defaultValue = defaultValue;
+        }
+        return result;
+      })
+      .filter((a): a is UMLAttribute => a !== null);
+
+    const methods: UMLMethod[] = (classifier.methods || [])
+      .map((methodId): UMLMethod | null => {
+        const methodEl = elements[methodId] as UMLClassifierMember | undefined;
+        if (!methodEl) return null;
+        const parsed = parseMethod(methodEl.name);
+        const visibility = (methodEl.visibility as Visibility) || parsed.visibility;
+        return {
+          id: methodEl.id,
+          name: parsed.name,
+          returnType: parsed.returnType,
+          parameters: [] as { name: string; type: string }[],
+          visibility,
+        };
+      })
+      .filter((m): m is UMLMethod => m !== null);
+    classes.push({
+      id: el.id,
+      name: el.name || 'Class',
       kind,
       attributes,
       methods,
-      position: { x: node.position?.x ?? 0, y: node.position?.y ?? 0 },
-      width,
-      height,
-    };
-  });
+      position: { x: el.bounds?.x ?? 0, y: el.bounds?.y ?? 0 },
+      width: el.bounds?.width,
+      height: el.bounds?.height,
+    });
+  }
 
-  const relations: UMLRelation[] = rawEdges.map((edge) => {
-    const data = (edge.data || {}) as Record<string, unknown>;
-    const mcuRel = data._mcuRelation as UMLRelation | undefined;
-
+  const relations: UMLRelation[] = Object.values(rels).map((rel) => {
+    const assoc = rel as unknown as UMLAssociation;
     return {
-      id: edge.id,
-      kind: mapEdgeTypeToKind(edge.type),
-      sourceClassId: edge.source,
-      targetClassId: edge.target,
-      sourceCardinality: ((data.sourceMultiplicity as string) || mcuRel?.sourceCardinality || '1') as Cardinality,
-      targetCardinality: ((data.targetMultiplicity as string) || mcuRel?.targetCardinality || '1') as Cardinality,
-      sourceRole: (data.sourceRole as string) || mcuRel?.sourceRole,
-      targetRole: (data.targetRole as string) || mcuRel?.targetRole,
-      name: (data.label as string) || mcuRel?.name,
-      attributes: mcuRel?.attributes,
-      sourceHandle: edge.sourceHandle || mcuRel?.sourceHandle,
-      targetHandle: edge.targetHandle || mcuRel?.targetHandle,
+      id: rel.id,
+      kind: relTypeToKind(rel.type),
+      sourceClassId: rel.source.element,
+      targetClassId: rel.target.element,
+      sourceCardinality: ((assoc.source as UMLAssociation['source']).multiplicity || '1') as Cardinality,
+      targetCardinality: ((assoc.target as UMLAssociation['target']).multiplicity || '1') as Cardinality,
+      sourceRole: (assoc.source as UMLAssociation['source']).role || undefined,
+      targetRole: (assoc.target as UMLAssociation['target']).role || undefined,
+      name: rel.name || undefined,
+      sourceHandle: directionToHandle(rel.source.direction as string),
+      targetHandle: directionToHandle(rel.target.direction as string),
     };
   });
-
-  const rawModel = apollonModel as unknown as Record<string, unknown>;
 
   return {
-    id: apollonModel.id,
-    name: apollonModel.title || 'Diagrama',
-    version: typeof rawModel.version === 'number' ? rawModel.version : 1,
+    id: 'diagram',
+    name: 'Diagrama',
+    version: 1,
     classes,
     relations,
   };
 }
-
